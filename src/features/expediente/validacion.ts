@@ -81,7 +81,12 @@ export function validarParaEnvio(expediente: Expediente): CampoFaltante[] {
     })
   if (campusResp === 'si') {
     const meds = (get(r, 'seccion4.durante_campus.medicamentos') as
-      | Array<{ nombre?: string; dosis?: string; frecuencia?: string }>
+      | Array<{
+          nombre?: string
+          dosis?: string
+          horarios?: string[]
+          prn?: boolean
+        }>
       | undefined) ?? []
     if (meds.length === 0)
       faltantes.push({
@@ -89,10 +94,17 @@ export function validarParaEnvio(expediente: Expediente): CampoFaltante[] {
         descripcion: 'Al menos un medicamento durante el Campus',
       })
     meds.forEach((m, i) => {
-      if (!m.nombre || !m.dosis || !m.frecuencia)
+      const faltaBasico = !m.nombre || !m.dosis
+      const faltaHorario = (m.horarios ?? []).length === 0 && !m.prn
+      if (faltaBasico)
         faltantes.push({
           seccion: 4,
-          descripcion: `Medicamento ${i + 1}: completar nombre, dosis y frecuencia`,
+          descripcion: `Medicamento ${i + 1}: completar nombre y dosis`,
+        })
+      if (faltaHorario)
+        faltantes.push({
+          seccion: 4,
+          descripcion: `Medicamento ${i + 1}: marcar al menos una hora o "según necesidad"`,
         })
     })
   }

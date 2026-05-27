@@ -19,7 +19,30 @@ const RELACIONES = [
 
 // DNI español (8 dígitos + letra) o NIE (X/Y/Z + 7 dígitos + letra)
 const DNI_REGEX = /^([XYZ]\d{7}|\d{8})[A-Za-z]$/
-const TELEFONO_REGEX = /^\d{9,15}$/ // solo dígitos, 9-15
+
+// Teléfono: aceptamos
+//  - Forma internacional nueva +CCdígitos (la que escribe la UI nueva)
+//  - Forma legacy de solo dígitos (datos antiguos pre-prefijo)
+const TELEFONO_REGEX = /^(\+\d{8,18}|\d{9,15})$/
+
+// Lista de prefijos disponibles en el selector
+const PREFIJOS: Array<{ code: string; label: string }> = [
+  { code: '+34', label: 'España' },
+  { code: '+33', label: 'Francia' },
+  { code: '+351', label: 'Portugal' },
+  { code: '+39', label: 'Italia' },
+  { code: '+49', label: 'Alemania' },
+  { code: '+44', label: 'Reino Unido' },
+  { code: '+41', label: 'Suiza' },
+  { code: '+32', label: 'Bélgica' },
+  { code: '+31', label: 'Países Bajos' },
+  { code: '+212', label: 'Marruecos' },
+  { code: '+1', label: 'EE.UU. / Canadá' },
+  { code: '+52', label: 'México' },
+  { code: '+54', label: 'Argentina' },
+  { code: '+57', label: 'Colombia' },
+  { code: '+55', label: 'Brasil' },
+]
 
 const contactoSchema = z.object({
   telefono: z
@@ -102,6 +125,7 @@ export function Seccion2Familia({
     register,
     handleSubmit,
     watch,
+    setValue,
     control,
     formState: { errors, isSubmitting },
   } = useForm<Seccion2Values>({
@@ -266,7 +290,8 @@ export function Seccion2Familia({
               <Field label="Teléfono" error={contactoErrors?.telefono?.message}>
                 <InputTelefono
                   name={`contactos.${idx}.telefono` as const}
-                  register={register}
+                  watch={watch}
+                  setValue={setValue}
                 />
               </Field>
 
@@ -361,40 +386,74 @@ function Field({
   )
 }
 
-// Input de teléfono que solo permite dígitos (filtra en tiempo real).
+// Input de teléfono con selector de prefijo internacional.
+// El valor en el form se guarda como string concatenado "+34600111222".
+function parseTelefono(valor: string): { prefijo: string; digitos: string } {
+  if (typeof valor !== 'string' || !valor) {
+    return { prefijo: '+34', digitos: '' }
+  }
+  if (valor.startsWith('+')) {
+    // Ordenamos por longitud descendente para que +351 gane sobre +3.
+    const ordenados = [...PREFIJOS].sort(
+      (a, b) => b.code.length - a.code.length
+    )
+    for (const p of ordenados) {
+      if (valor.startsWith(p.code)) {
+        return { prefijo: p.code, digitos: valor.slice(p.code.length) }
+      }
+    }
+    // Prefijo desconocido en datos viejos: lo descartamos y caemos a +34.
+    return { prefijo: '+34', digitos: valor.replace(/^\+\d+/, '') }
+  }
+  // Sin prefijo (datos legacy) → asumimos España.
+  return { prefijo: '+34', digitos: valor }
+}
+
 function InputTelefono({
   name,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register,
+  watch,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setValue,
 }: {
   name: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: any
-}) {
+  watch: any
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const reg = register(name) as {
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-    onBlur: (e: React.FocusEvent<HTMLInputElement>) => void
-    ref: React.Ref<HTMLInputElement>
-    name: string
-  }
+  setValue: any
+}) {
+  const valorActual = (watch(name) ?? '') as string
+  const { prefijo, digitos } = parseTelefono(valorActual)
+  const emit = (nuevoPrefijo: string, nuevosDigitos: string) =>
+    setValue(name, nuevoPrefijo + nuevosDigitos, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
   return (
-    <input
-      type="tel"
-      inputMode="numeric"
-      autoComplete="tel"
-      maxLength={15}
-      pattern="[0-9]*"
-      placeholder="600111222"
-      className={inputCls}
-      name={reg.name}
-      ref={reg.ref}
-      onBlur={reg.onBlur}
-      onChange={(e) => {
-        const soloDigitos = e.target.value.replace(/\D/g, '')
-        if (e.target.value !== soloDigitos) e.target.value = soloDigitos
-        reg.onChange(e)
-      }}
-    />
+    <div className="flex gap-2">
+      <select
+        value={prefijo}
+        onChange={(e) => emit(e.target.value, digitos)}
+        className="rounded-lg border border-slate-300 px-2 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 bg-white shrink-0"
+        aria-label="Prefijo país"
+      >
+        {PREFIJOS.map((p) => (
+          <option key={p.code} value={p.code}>
+            {p.code} {p.label}
+          </option>
+        ))}
+      </select>
+      <input
+        type="tel"
+        inputMode="numeric"
+        autoComplete="tel"
+        maxLength={15}
+        pattern="[0-9]*"
+        placeholder="600111222"
+        value={digitos}
+        onChange={(e) => emit(prefijo, e.target.value.replace(/\D/g, ''))}
+        className={`${inputCls} flex-1`}
+      />
+    </div>
   )
 }

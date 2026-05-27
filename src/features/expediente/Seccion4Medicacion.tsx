@@ -3,6 +3,8 @@ import {
   useFieldArray,
   useForm,
   type UseFormRegister,
+  type UseFormSetValue,
+  type UseFormWatch,
 } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -21,13 +23,20 @@ const noSi = z.union([z.literal('no'), z.literal('si')], {
 })
 
 // Schema base de medicamento — todos los campos opcionales en zod.
-// La obligatoriedad de nombre/dosis/frecuencia solo aplica si la familia
+// La obligatoriedad de nombre/dosis/horario solo aplica si la familia
 // indicó "Sí" a la pregunta correspondiente (se valida en `superRefine` más
 // abajo). Esto evita que residuos del array (medicamento auto-añadido al
 // marcar Sí) bloqueen el envío si después la familia rectifica a "No".
+//
+// `horarios` es un array de "HH:00" (horas enteras 07:00–22:00).
+// `prn` indica administración según necesidad (sin horario fijo).
+// Compatibilidad: aceptamos `frecuencia` (string libre) en lectura por si
+// hubiera datos antiguos pre-cambio, pero la UI ya no lo escribe.
 const medItem = z.object({
   nombre: z.string().optional(),
   dosis: z.string().optional(),
+  horarios: z.array(z.string()).optional(),
+  prn: z.boolean().optional(),
   frecuencia: z.string().optional(),
   indicaciones: z.string().optional(),
 })
@@ -69,7 +78,7 @@ const schema = z
     }
 
     // Medicación durante Campus: si Sí → al menos un medicamento con
-    // nombre + dosis + frecuencia.
+    // nombre + dosis + (al menos una hora marcada o "según necesidad").
     if (v.durante_campus.respuesta === 'si') {
       if (v.durante_campus.medicamentos.length === 0) {
         ctx.addIssue({
@@ -93,11 +102,12 @@ const schema = z
             message: 'Obligatorio',
           })
         }
-        if (!m.frecuencia?.trim()) {
+        const tieneHoras = (m.horarios ?? []).length > 0
+        if (!tieneHoras && !m.prn) {
           ctx.addIssue({
-            path: ['durante_campus', 'medicamentos', i, 'frecuencia'],
+            path: ['durante_campus', 'medicamentos', i, 'horarios'],
             code: z.ZodIssueCode.custom,
-            message: 'Obligatorio',
+            message: 'Marca al menos una hora o "según necesidad"',
           })
         }
       })
@@ -175,12 +185,17 @@ export function Seccion4Medicacion({
   // que despisten al usuario y a la validación.
   useEffect(() => {
     if (habitualResp === 'si' && habitualArray.fields.length === 0) {
-      habitualArray.append({ nombre: '', dosis: '', frecuencia: '' })
+      habitualArray.append({ nombre: '', dosis: '', horarios: [], prn: false })
     } else if (habitualResp === 'no' && habitualArray.fields.length > 0) {
       // Solo limpia si TODO el array está vacío (no pisamos datos genuinos)
       const todoVacio = habitualArray.fields.every((_, i) => {
         const m = values.habitual?.medicamentos?.[i]
-        return !m?.nombre?.trim() && !m?.dosis?.trim() && !m?.frecuencia?.trim()
+        return (
+          !m?.nombre?.trim() &&
+          !m?.dosis?.trim() &&
+          (m?.horarios ?? []).length === 0 &&
+          !m?.prn
+        )
       })
       if (todoVacio) {
         for (let i = habitualArray.fields.length - 1; i >= 0; i--) {
@@ -196,13 +211,19 @@ export function Seccion4Medicacion({
       campusArray.append({
         nombre: '',
         dosis: '',
-        frecuencia: '',
+        horarios: [],
+        prn: false,
         indicaciones: '',
       })
     } else if (campusResp === 'no' && campusArray.fields.length > 0) {
       const todoVacio = campusArray.fields.every((_, i) => {
         const m = values.durante_campus?.medicamentos?.[i]
-        return !m?.nombre?.trim() && !m?.dosis?.trim() && !m?.frecuencia?.trim()
+        return (
+          !m?.nombre?.trim() &&
+          !m?.dosis?.trim() &&
+          (m?.horarios ?? []).length === 0 &&
+          !m?.prn
+        )
       })
       if (todoVacio) {
         for (let i = campusArray.fields.length - 1; i >= 0; i--) {
@@ -267,9 +288,16 @@ export function Seccion4Medicacion({
             fields={habitualArray.fields}
             onRemove={habitualArray.remove}
             onAppend={() =>
-              habitualArray.append({ nombre: '', dosis: '', frecuencia: '' })
+              habitualArray.append({
+                nombre: '',
+                dosis: '',
+                horarios: [],
+                prn: false,
+              })
             }
             register={register}
+            watch={watch}
+            setValue={setValue}
             prefix="habitual.medicamentos"
             errors={errors}
             variante="habitual"
@@ -303,11 +331,14 @@ export function Seccion4Medicacion({
                 campusArray.append({
                   nombre: '',
                   dosis: '',
-                  frecuencia: '',
+                  horarios: [],
+                  prn: false,
                   indicaciones: '',
                 })
               }
               register={register}
+              watch={watch}
+              setValue={setValue}
               prefix="durante_campus.medicamentos"
               errors={errors}
               variante="campus"
@@ -393,6 +424,8 @@ function ListaMedicamentos({
   onRemove,
   onAppend,
   register,
+  watch,
+  setValue,
   prefix,
   errors,
   variante,
@@ -402,6 +435,10 @@ function ListaMedicamentos({
   onAppend: () => void
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: UseFormRegister<any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  watch: UseFormWatch<any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setValue: UseFormSetValue<any>
   prefix: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   errors: any
@@ -452,14 +489,34 @@ function ListaMedicamentos({
                 {...register(`${prefix}.${idx}.dosis`)}
               />
             </Field>
-            <Field label="Frecuencia / horario" error={itemError?.frecuencia?.message}>
-              <input
-                type="text"
-                className={inputCls}
-                placeholder={
-                  variante === 'campus' ? 'p.ej. cada 8 horas' : 'opcional'
+            <Field
+              label={
+                variante === 'campus'
+                  ? 'Horario de administración'
+                  : 'Horario (opcional)'
+              }
+              error={itemError?.horarios?.message}
+            >
+              <SelectorHorario
+                horarios={
+                  (watch(`${prefix}.${idx}.horarios`) as string[] | undefined) ??
+                  []
                 }
-                {...register(`${prefix}.${idx}.frecuencia`)}
+                prn={
+                  (watch(`${prefix}.${idx}.prn`) as boolean | undefined) ?? false
+                }
+                onChangeHorarios={(h) =>
+                  setValue(`${prefix}.${idx}.horarios`, h, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
+                onChangePrn={(v) =>
+                  setValue(`${prefix}.${idx}.prn`, v, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
               />
             </Field>
             {variante === 'campus' && (
@@ -523,6 +580,63 @@ function Field({
       </label>
       {children}
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
+    </div>
+  )
+}
+
+// Horas enteras 07:00–22:00.
+const HORAS_DISPONIBLES: string[] = Array.from({ length: 16 }, (_, i) =>
+  `${String(7 + i).padStart(2, '0')}:00`
+)
+
+function SelectorHorario({
+  horarios,
+  prn,
+  onChangeHorarios,
+  onChangePrn,
+}: {
+  horarios: string[]
+  prn: boolean
+  onChangeHorarios: (h: string[]) => void
+  onChangePrn: (v: boolean) => void
+}) {
+  const seleccionadas = new Set(horarios)
+  const toggle = (h: string) => {
+    const next = new Set(seleccionadas)
+    if (next.has(h)) next.delete(h)
+    else next.add(h)
+    onChangeHorarios(Array.from(next).sort())
+  }
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+        {HORAS_DISPONIBLES.map((h) => {
+          const activo = seleccionadas.has(h)
+          return (
+            <button
+              key={h}
+              type="button"
+              aria-pressed={activo}
+              onClick={() => toggle(h)}
+              className={
+                activo
+                  ? 'rounded-lg border px-2 py-1.5 text-sm font-medium bg-slate-900 text-white border-slate-900'
+                  : 'rounded-lg border px-2 py-1.5 text-sm font-medium bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
+              }
+            >
+              {h}
+            </button>
+          )
+        })}
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={prn}
+          onChange={(e) => onChangePrn(e.target.checked)}
+        />
+        <span>Según necesidad (sin horario fijo)</span>
+      </label>
     </div>
   )
 }

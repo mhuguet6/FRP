@@ -1,7 +1,12 @@
 import { Link } from 'react-router-dom'
 import type { Expediente } from './api'
 
-export function ExpedienteEnviadoView({ expediente }: { expediente: Expediente }) {
+type Props = {
+  expediente: Expediente
+  onModificar?: () => void
+}
+
+export function ExpedienteEnviadoView({ expediente, onModificar }: Props) {
   const fecha = expediente.submitted_at
     ? new Date(expediente.submitted_at).toLocaleString('es-ES', {
         day: '2-digit',
@@ -42,17 +47,29 @@ export function ExpedienteEnviadoView({ expediente }: { expediente: Expediente }
             contacto contigo.
           </li>
           <li>
-            Si necesitas modificar algo, escríbenos respondiendo a este email
-            de inscripción.
+            ¿Algún dato cambió? Puedes modificarlo cuando quieras pulsando el
+            botón de abajo. Si la modificación afecta a algún apartado
+            firmado, tendrás que volver a firmarlo.
           </li>
         </ul>
       </div>
-      <Link
-        to="/mis-expedientes"
-        className="inline-block rounded-lg bg-slate-900 text-white font-medium px-4 py-2.5 hover:bg-slate-800"
-      >
-        Volver a mis expedientes
-      </Link>
+      <div className="flex flex-col sm:flex-row gap-2 justify-center">
+        {onModificar && (
+          <button
+            type="button"
+            onClick={onModificar}
+            className="inline-block rounded-lg bg-amber-700 text-white font-medium px-4 py-2.5 hover:bg-amber-800"
+          >
+            ✎ Modificar formulario
+          </button>
+        )}
+        <Link
+          to="/mis-expedientes"
+          className="inline-block rounded-lg bg-slate-900 text-white font-medium px-4 py-2.5 hover:bg-slate-800"
+        >
+          Volver a mis expedientes
+        </Link>
+      </div>
     </div>
   )
 }

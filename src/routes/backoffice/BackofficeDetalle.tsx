@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { useStaffStatus } from '../../lib/useStaffStatus'
 import {
   actualizarExpediente,
+  anularPago,
+  getDatosClienta,
   getExpediente,
   getUrlFirmada,
   registrarEvento,
@@ -68,6 +70,7 @@ export function BackofficeDetalle() {
   const [firmas, setFirmas] = useState<FirmaRow[]>([])
   const [documentos, setDocumentos] = useState<DocumentoRow[]>([])
   const [eventos, setEventos] = useState<EventoRow[]>([])
+  const [datosClienta, setDatosClienta] = useState<Record<string, unknown> | null>(null)
   const [fotoUrl, setFotoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -80,6 +83,10 @@ export function BackofficeDetalle() {
         if (exp.foto_path) {
           getUrlFirmada(exp.foto_path).then(setFotoUrl).catch(() => {})
         }
+        // Cargar datos privados de la clienta (chozo, importe, observaciones, etc.)
+        getDatosClienta(id)
+          .then(setDatosClienta)
+          .catch(() => {})
         const [fRes, dRes, eRes] = await Promise.all([
           supabase
             .from('firmas')
@@ -277,6 +284,23 @@ export function BackofficeDetalle() {
           onNuevoEvento={(ev) => setEventos((cur) => [ev, ...cur])}
         />
 
+        {/* Edición de datos básicos (solo staff) */}
+        <PanelEdicion
+          expediente={expediente}
+          staffEmail={
+            session.status === 'authenticated'
+              ? session.session.user.email ?? 'staff'
+              : 'staff'
+          }
+          onUpdated={(updated) => setExpediente(updated)}
+          onNuevoEvento={(ev) => setEventos((cur) => [ev, ...cur])}
+        />
+
+        {/* Datos privados de la clienta (chozo, importe, observaciones...) */}
+        {datosClienta && Object.keys(datosClienta).length > 0 && (
+          <BloqueDatosClienta datos={datosClienta} />
+        )}
+
         {/* Sección 1: datos del participante */}
         <Bloque titulo="Datos del participante">
           <Row k="Nombre y apellidos" v={`${expediente.alumno_nombre ?? ''} ${expediente.alumno_apellidos ?? ''}`} />
@@ -364,27 +388,33 @@ export function BackofficeDetalle() {
           />
           {((s4?.habitual as R | undefined)?.medicamentos as
             | Array<R>
-            | undefined)?.map((m, i) => (
-            <div key={i} className="text-sm text-slate-700 ml-4">
-              • <strong>{m.nombre as string}</strong>
-              {m.dosis ? ` — ${m.dosis as string}` : ''}
-              {m.frecuencia ? ` (${m.frecuencia as string})` : ''}
-            </div>
-          ))}
+            | undefined)?.map((m, i) => {
+            const hor = fmtHorarioMed(m)
+            return (
+              <div key={i} className="text-sm text-slate-700 ml-4">
+                • <strong>{m.nombre as string}</strong>
+                {m.dosis ? ` — ${m.dosis as string}` : ''}
+                {hor ? ` (${hor})` : ''}
+              </div>
+            )
+          })}
           <Row
             k="Medicación durante el Campus"
             v={(s4?.durante_campus as R | undefined)?.respuesta as string | undefined}
           />
           {((s4?.durante_campus as R | undefined)?.medicamentos as
             | Array<R>
-            | undefined)?.map((m, i) => (
-            <div key={i} className="text-sm text-slate-700 ml-4">
-              • <strong>{m.nombre as string}</strong>
-              {m.dosis ? ` — ${m.dosis as string}` : ''}
-              {m.frecuencia ? ` (${m.frecuencia as string})` : ''}
-              {m.indicaciones ? ` · ${m.indicaciones as string}` : ''}
-            </div>
-          ))}
+            | undefined)?.map((m, i) => {
+            const hor = fmtHorarioMed(m)
+            return (
+              <div key={i} className="text-sm text-slate-700 ml-4">
+                • <strong>{m.nombre as string}</strong>
+                {m.dosis ? ` — ${m.dosis as string}` : ''}
+                {hor ? ` (${hor})` : ''}
+                {m.indicaciones ? ` · ${m.indicaciones as string}` : ''}
+              </div>
+            )
+          })}
           <Row
             k="Receta médica adjunta"
             v={(s4?.durante_campus as R | undefined)?.receta_adjunta as string | undefined}
@@ -580,6 +610,16 @@ function formatearFecha(iso: string): string {
     day: 'numeric',
     month: 'long',
   })
+}
+
+function fmtHorarioMed(m: R): string {
+  const horarios = Array.isArray(m.horarios) ? (m.horarios as string[]) : []
+  const partes: string[] = []
+  if (horarios.length > 0) partes.push(horarios.join(', '))
+  if (m.prn === true) partes.push('según necesidad')
+  if (partes.length > 0) return partes.join(' + ')
+  // Compat con datos antiguos en texto libre.
+  return typeof m.frecuencia === 'string' ? m.frecuencia.trim() : ''
 }
 
 const estadoColor: Record<string, string> = {
@@ -814,6 +854,7 @@ function PanelGestion({
   )
   const [guardando, setGuardando] = useState(false)
   const [confirmandoImagen, setConfirmandoImagen] = useState(false)
+  const [anulandoPago, setAnulandoPago] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
@@ -822,6 +863,38 @@ function PanelGestion({
     observaciones !== (expediente.observaciones_internas ?? '')
 
   const pendienteImagen = requiereConfirmacionImagen(expediente)
+  const puedeAnularPago =
+    expediente.tipo === 'estudiante' && !!expediente.pagado_at
+
+  const onAnularPago = async () => {
+    const aviso = expediente.formulario_enviado_at
+      ? '¿Anular el pago? OJO: el formulario ya se ha enviado a la familia. Aún así puedes revertir la confirmación de pago.'
+      : '¿Anular la confirmación de pago de este expediente?'
+    if (!confirm(aviso)) return
+    setAnulandoPago(true)
+    setError(null)
+    try {
+      await anularPago(expediente.id, staffEmail)
+      const ahora = new Date().toISOString()
+      onUpdated({
+        ...expediente,
+        pagado_at: null,
+        pagado_por: null,
+      })
+      onNuevoEvento({
+        id: Date.now(),
+        tipo: 'pago_revertido',
+        payload: { por: staffEmail },
+        actor: staffEmail,
+        created_at: ahora,
+      })
+      setOk('Confirmación de pago anulada.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo anular el pago')
+    } finally {
+      setAnulandoPago(false)
+    }
+  }
 
   const onConfirmarImagen = async () => {
     setConfirmandoImagen(true)
@@ -921,6 +994,30 @@ function PanelGestion({
         <span className="text-xs text-amber-700">solo staff</span>
       </div>
 
+      {puedeAnularPago && (
+        <div className="rounded-lg bg-white border border-red-300 p-3 space-y-2">
+          <div className="text-sm font-medium text-red-900">
+            Pago confirmado
+          </div>
+          <p className="text-xs text-red-800">
+            Este expediente está marcado como pagado el{' '}
+            <strong>
+              {new Date(expediente.pagado_at as string).toLocaleString('es-ES')}
+            </strong>
+            {expediente.pagado_por ? ` por ${expediente.pagado_por}` : ''}. Si
+            fue un error, puedes anularlo.
+          </p>
+          <button
+            type="button"
+            onClick={onAnularPago}
+            disabled={anulandoPago}
+            className="text-sm font-medium rounded-lg bg-white text-red-700 border border-red-300 px-3 py-1.5 hover:bg-red-50 disabled:opacity-50"
+          >
+            {anulandoPago ? 'Anulando…' : '✗ Anular confirmación de pago'}
+          </button>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">
           Estado del expediente
@@ -1000,6 +1097,369 @@ function PanelGestion({
           {guardando ? 'Guardando…' : 'Guardar cambios'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ----------------------------------------------------------------------------
+// Panel de edición de datos básicos (solo staff)
+// ----------------------------------------------------------------------------
+
+type EdicionForm = {
+  alumno_nombre: string
+  alumno_apellidos: string
+  fecha_nacimiento: string
+  direccion: string
+  programa: '' | 'robotica' | 'emprendimiento'
+  tutor_nombre: string
+  tutor_dni: string
+  tutor_email: string
+  tutor_telefono: string
+}
+
+function PanelEdicion({
+  expediente,
+  staffEmail,
+  onUpdated,
+  onNuevoEvento,
+}: {
+  expediente: Expediente
+  staffEmail: string
+  onUpdated: (e: Expediente) => void
+  onNuevoEvento: (ev: EventoRow) => void
+}) {
+  const s1 = (expediente.respuestas?.seccion1 as R | undefined) ?? {}
+
+  const valoresIniciales = (): EdicionForm => ({
+    alumno_nombre: expediente.alumno_nombre ?? '',
+    alumno_apellidos: expediente.alumno_apellidos ?? '',
+    fecha_nacimiento: expediente.fecha_nacimiento ?? '',
+    direccion: (s1.direccion as string | undefined) ?? '',
+    programa: (expediente.programa as EdicionForm['programa']) ?? '',
+    tutor_nombre: expediente.tutor_nombre ?? '',
+    tutor_dni: expediente.tutor_dni ?? '',
+    tutor_email: expediente.tutor_email ?? '',
+    tutor_telefono: expediente.tutor_telefono ?? '',
+  })
+
+  const [editando, setEditando] = useState(false)
+  const [form, setForm] = useState<EdicionForm>(valoresIniciales)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [ok, setOk] = useState<string | null>(null)
+
+  const cambio = (k: keyof EdicionForm) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => setForm((cur) => ({ ...cur, [k]: e.target.value }))
+
+  const onCancelar = () => {
+    setForm(valoresIniciales())
+    setEditando(false)
+    setError(null)
+    setOk(null)
+  }
+
+  const onGuardar = async () => {
+    setError(null)
+    setOk(null)
+    if (!form.alumno_nombre.trim() || !form.alumno_apellidos.trim()) {
+      setError('Nombre y apellidos son obligatorios.')
+      return
+    }
+    if (!form.tutor_email.trim()) {
+      setError('El email del tutor es obligatorio.')
+      return
+    }
+    setGuardando(true)
+    try {
+      // Combinamos respuestas existentes con los campos editables que
+      // viven en jsonb (direccion). El resto son columnas tipadas.
+      const nuevasRespuestas: Record<string, unknown> = {
+        ...(expediente.respuestas as Record<string, unknown>),
+        seccion1: {
+          ...(s1 as Record<string, unknown>),
+          nombre: form.alumno_nombre.trim(),
+          apellidos: form.alumno_apellidos.trim(),
+          fecha_nacimiento: form.fecha_nacimiento,
+          direccion: form.direccion.trim(),
+        },
+        seccion2: {
+          ...((expediente.respuestas?.seccion2 as Record<string, unknown>) ?? {}),
+          tutor_nombre: form.tutor_nombre.trim(),
+          email_contacto: form.tutor_email.trim(),
+        },
+      }
+      const patch: Partial<Expediente> = {
+        alumno_nombre: form.alumno_nombre.trim() || null,
+        alumno_apellidos: form.alumno_apellidos.trim() || null,
+        fecha_nacimiento: form.fecha_nacimiento || null,
+        programa: form.programa || null,
+        tutor_nombre: form.tutor_nombre.trim() || null,
+        tutor_dni: form.tutor_dni.trim() || null,
+        tutor_email: form.tutor_email.trim() || null,
+        tutor_telefono: form.tutor_telefono.trim() || null,
+        respuestas: nuevasRespuestas,
+      }
+      await actualizarExpediente(expediente.id, patch)
+      await registrarEvento(
+        expediente.id,
+        'datos_editados',
+        { por: staffEmail },
+        staffEmail
+      )
+      const actualizado = { ...expediente, ...patch } as Expediente
+      onUpdated(actualizado)
+      onNuevoEvento({
+        id: Date.now(),
+        tipo: 'datos_editados',
+        payload: { por: staffEmail },
+        actor: staffEmail,
+        created_at: new Date().toISOString(),
+      })
+      setOk('Datos actualizados.')
+      setEditando(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al guardar')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  if (!editando) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">
+            Editar expediente
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Edición rápida de datos básicos, o formulario completo (todas las
+            secciones).
+          </p>
+          {ok && <p className="text-xs text-emerald-700 mt-1">✓ {ok}</p>}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              setForm(valoresIniciales())
+              setEditando(true)
+              setOk(null)
+            }}
+            className="rounded-lg border border-slate-300 text-slate-700 text-sm font-medium px-3 py-1.5 hover:bg-slate-50"
+          >
+            ✎ Datos básicos
+          </button>
+          <Link
+            to={`/admin/expediente/${expediente.id}/editar`}
+            className="rounded-lg bg-slate-900 text-white text-sm font-medium px-3 py-1.5 hover:bg-slate-800"
+          >
+            ✎ Formulario completo →
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-slate-900">
+          Editar datos básicos
+        </h2>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Campo label="Nombre">
+          <input
+            type="text"
+            className={inputClsEdit}
+            value={form.alumno_nombre}
+            onChange={cambio('alumno_nombre')}
+          />
+        </Campo>
+        <Campo label="Apellidos">
+          <input
+            type="text"
+            className={inputClsEdit}
+            value={form.alumno_apellidos}
+            onChange={cambio('alumno_apellidos')}
+          />
+        </Campo>
+        <Campo label="Fecha de nacimiento">
+          <input
+            type="date"
+            className={inputClsEdit}
+            value={form.fecha_nacimiento}
+            onChange={cambio('fecha_nacimiento')}
+          />
+        </Campo>
+        <Campo label="Programa">
+          <select
+            className={inputClsEdit}
+            value={form.programa}
+            onChange={cambio('programa')}
+          >
+            <option value="">— Sin programa</option>
+            <option value="robotica">Robótica</option>
+            <option value="emprendimiento">Emprendimiento</option>
+          </select>
+        </Campo>
+        <Campo label="Dirección">
+          <input
+            type="text"
+            className={inputClsEdit}
+            value={form.direccion}
+            onChange={cambio('direccion')}
+          />
+        </Campo>
+        <Campo label="Tutor/a (nombre)">
+          <input
+            type="text"
+            className={inputClsEdit}
+            value={form.tutor_nombre}
+            onChange={cambio('tutor_nombre')}
+          />
+        </Campo>
+        <Campo label="DNI / NIE del tutor">
+          <input
+            type="text"
+            className={inputClsEdit}
+            value={form.tutor_dni}
+            onChange={cambio('tutor_dni')}
+          />
+        </Campo>
+        <Campo label="Email del tutor">
+          <input
+            type="email"
+            inputMode="email"
+            className={inputClsEdit}
+            value={form.tutor_email}
+            onChange={cambio('tutor_email')}
+          />
+        </Campo>
+        <Campo label="Teléfono del tutor">
+          <input
+            type="tel"
+            className={inputClsEdit}
+            value={form.tutor_telefono}
+            onChange={cambio('tutor_telefono')}
+          />
+        </Campo>
+      </div>
+
+      <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2.5">
+        Esta edición se registra como evento <code>datos_editados</code> en el
+        historial. Si el formulario ya fue enviado por la familia, modifica solo
+        lo imprescindible.
+      </p>
+
+      <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+        <div className="text-sm">
+          {error ? <span className="text-red-700">{error}</span> : null}
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancelar}
+            disabled={guardando}
+            className="rounded-lg border border-slate-300 text-slate-700 text-sm font-medium px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onGuardar}
+            disabled={guardando}
+            className="rounded-lg bg-slate-900 text-white text-sm font-medium px-4 py-2 hover:bg-slate-800 disabled:opacity-50"
+          >
+            {guardando ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const inputClsEdit =
+  'w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900'
+
+function Campo({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-0.5">
+        {label}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+// ----------------------------------------------------------------------------
+// Bloque "Datos de la clienta" — chozo, importe, observaciones, etc.
+// Lo aportó la clienta al crear el expediente. No es visible a la familia.
+// ----------------------------------------------------------------------------
+
+const ETIQUETAS_DATOS_CLIENTA: Record<string, string> = {
+  genero: 'Género',
+  edad: 'Edad',
+  chozo: 'Chozo / habitación',
+  repetidor: 'Repetidor/a',
+  centro_educativo: 'Centro educativo',
+  padres: 'Padres / tutores',
+  profesiones: 'Profesiones',
+  importe: 'Importe',
+  observaciones: 'Observaciones',
+  notas: 'Notas',
+}
+
+function BloqueDatosClienta({ datos }: { datos: Record<string, unknown> }) {
+  const obs = (datos.observaciones ?? datos.notas) as string | undefined
+  // El resto (excluyendo observaciones para no duplicar)
+  const otros = Object.entries(datos).filter(
+    ([k, v]) =>
+      k !== 'observaciones' &&
+      k !== 'notas' &&
+      v !== null &&
+      v !== undefined &&
+      String(v).trim() !== ''
+  )
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-semibold text-slate-900">
+          Datos de la clienta
+        </h2>
+        <span className="text-[10px] text-slate-500">
+          Privado, no visible a la familia
+        </span>
+      </div>
+      {obs && obs.trim() && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+          <div className="text-xs font-medium text-amber-900 mb-1">
+            Observaciones
+          </div>
+          <div className="text-sm text-amber-900 whitespace-pre-wrap">{obs}</div>
+        </div>
+      )}
+      {otros.length > 0 && (
+        <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
+          {otros.map(([k, v]) => (
+            <div key={k} className="flex items-baseline gap-2 text-sm">
+              <span className="text-slate-500 min-w-[120px]">
+                {ETIQUETAS_DATOS_CLIENTA[k] ?? k}
+              </span>
+              <span className="text-slate-900">{String(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

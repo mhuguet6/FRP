@@ -22,16 +22,27 @@ export function Callback() {
         return
       }
 
-      // Si el email está en staff_emails → backoffice
+      // Resolver rol: staff → /admin, clienta → /clienta, resto → familia.
       const email = data.session.user.email
       if (email) {
-        const { data: rolData } = await supabase
-          .from('staff_emails')
-          .select('rol')
-          .eq('email', email)
-          .maybeSingle()
-        if (rolData) {
+        const [{ data: staffRow }, { data: clientaRow }] = await Promise.all([
+          supabase
+            .from('staff_emails')
+            .select('rol')
+            .eq('email', email)
+            .maybeSingle(),
+          supabase
+            .from('clienta_emails')
+            .select('email')
+            .eq('email', email.toLowerCase())
+            .maybeSingle(),
+        ])
+        if (staffRow) {
           navigate('/admin', { replace: true })
+          return
+        }
+        if (clientaRow) {
+          navigate('/clienta', { replace: true })
           return
         }
       }

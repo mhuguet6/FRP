@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { supabase } from '../../lib/supabase'
 import { useSession } from '../../lib/useSession'
 import { useStaffStatus } from '../../lib/useStaffStatus'
+import { useClientaStatus } from '../../lib/useClientaStatus'
 import { PageSpinner } from '../../components/ui/PageSpinner'
 
 const loginSchema = z.object({
@@ -24,6 +25,7 @@ export function Landing() {
   const navigate = useNavigate()
   const session = useSession()
   const staff = useStaffStatus()
+  const clienta = useClientaStatus()
   const [modo, setModo] = useState<'login' | 'magic'>('login')
   const [serverError, setServerError] = useState<string | null>(null)
   const [destino, setDestino] = useState<string | null>(null)
@@ -31,12 +33,15 @@ export function Landing() {
   const loginForm = useForm<LoginValues>({ resolver: zodResolver(loginSchema) })
   const magicForm = useForm<MagicValues>({ resolver: zodResolver(magicSchema) })
 
-  // Si ya estás autenticado, redirige al sitio que corresponda
+  // Si ya estás autenticado, redirige al sitio que corresponda.
+  // Prioridad: staff → /admin, clienta → /clienta, resto → /mis-expedientes.
   useEffect(() => {
     if (session.status !== 'authenticated') return
-    if (staff.status === 'loading') return
-    setDestino(staff.status === 'staff' ? '/admin' : '/mis-expedientes')
-  }, [session, staff])
+    if (staff.status === 'loading' || clienta.status === 'loading') return
+    if (staff.status === 'staff') setDestino('/admin')
+    else if (clienta.status === 'clienta') setDestino('/clienta')
+    else setDestino('/mis-expedientes')
+  }, [session, staff, clienta])
 
   if (session.status === 'loading') return <PageSpinner />
   if (destino) return <Navigate to={destino} replace />
@@ -48,7 +53,11 @@ export function Landing() {
       password: values.password,
     })
     if (error) {
-      setServerError('Email o contraseña incorrectos.')
+      // Mostramos el mensaje exacto que da Supabase (status + nombre)
+      // para diagnosticar fallos. En prod se puede volver a algo genérico.
+      setServerError(
+        `${error.message}${error.status ? ` (status ${error.status})` : ''}`
+      )
       return
     }
     // El useEffect de arriba redirige cuando la sesión esté lista.
@@ -74,10 +83,10 @@ export function Landing() {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-sm p-6 sm:p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-slate-900">
-            Campus FRP · Acceso del equipo
+            Campus FRP · Acceso
           </h1>
           <p className="text-slate-600 mt-2 text-sm">
-            Esta herramienta es interna de Robotix. Las familias acceden con el
+            Introduce tu email y contraseña. Las familias acceden con el
             enlace que reciben por email.
           </p>
         </div>
@@ -185,7 +194,7 @@ export function Landing() {
                 }}
                 className="text-xs text-slate-500 hover:text-slate-700"
               >
-                ← Volver al acceso del equipo
+                ← Volver al acceso
               </button>
             </div>
           </form>

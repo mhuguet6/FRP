@@ -174,9 +174,7 @@ export async function parseExcelInvitaciones(
     if (prop) {
       cabeceraMap.set(colNumber, prop)
     } else if (raw) {
-      // Cabecera desconocida → datos_clienta con su nombre normalizado
-      const key = '_clienta.' + n.replace(/[^a-z0-9]+/g, '_')
-      cabeceraMap.set(colNumber, key)
+      // Cabecera desconocida → la ignoramos por completo.
       cabecerasDesconocidas.push(raw)
     }
   })
@@ -184,7 +182,7 @@ export async function parseExcelInvitaciones(
   const avisos: string[] = []
   if (cabecerasDesconocidas.length > 0) {
     avisos.push(
-      `Columnas no reconocidas (se guardarán como datos internos): ${cabecerasDesconocidas.join(', ')}`
+      `Columnas ignoradas (no las reconocemos): ${cabecerasDesconocidas.join(', ')}`
     )
   }
 

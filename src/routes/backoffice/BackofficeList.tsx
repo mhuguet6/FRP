@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { useSession } from '../../lib/useSession'
 import { useStaffStatus } from '../../lib/useStaffStatus'
 import {
+  enviarFormularioAExpedientes,
   getEdicionActiva,
+  listarFormulariosEnviados,
+  listarPdfsGenerados,
   listarTodosExpedientes,
+  marcarPagado,
+  registrarEvento,
   type CampusEdicion,
   type Expediente,
 } from '../../features/expediente/api'
-import { exportarExcel } from '../../features/backoffice/excelExport'
 import {
   decisionImagenLabel,
   requiereConfirmacionImagen,
 } from '../../features/expediente/validacion'
 import {
-  exportarDocxCocinero,
-  exportarDocxSanitario,
-  exportarDocxStaff,
-} from '../../features/backoffice/docxExport'
+  exportarPdfCocinero,
+  exportarPdfLog,
+  exportarPdfMedico,
+} from '../../features/backoffice/pdfExport'
 import { PageSpinner } from '../../components/ui/PageSpinner'
 
 const estadoLabel: Record<string, string> = {
@@ -40,26 +45,29 @@ const estadoColor: Record<string, string> = {
   cerrado: 'bg-slate-200 text-slate-700',
 }
 
-const ESTADOS_FILTRO = [
-  'enviado',
-  'en_progreso',
-  'creado',
-  'validado',
-  'requiere_correccion',
-] as const
+const ESTADOS_FILTRO = ['creado', 'en_progreso', 'enviado'] as const
 
 export function BackofficeList() {
   const navigate = useNavigate()
   const staff = useStaffStatus()
+  const session = useSession()
+  const staffEmail = session.session?.user.email ?? 'admin'
   const [expedientes, setExpedientes] = useState<Expediente[] | null>(null)
   const [edicion, setEdicion] = useState<CampusEdicion | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [exportando, setExportando] = useState(false)
+  const [enviandoForm, setEnviandoForm] = useState(false)
+  const [enviandoSinPago, setEnviandoSinPago] = useState(false)
+  const [marcandoPagado, setMarcandoPagado] = useState(false)
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [estadoFiltro, setEstadoFiltro] = useState<string[]>([
-    'enviado',
+    'creado',
     'en_progreso',
+    'enviado',
   ])
   const [programaFiltro, setProgramaFiltro] = useState<string[]>([])
+  const [tipoFiltro, setTipoFiltro] = useState<string[]>(['estudiante'])
   const [soloPendientesImagen, setSoloPendientesImagen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
 
@@ -76,6 +84,7 @@ export function BackofficeList() {
   const filtrados = useMemo(() => {
     if (!expedientes) return []
     return expedientes.filter((e) => {
+      if (tipoFiltro.length > 0 && !tipoFiltro.includes(e.tipo)) return false
       if (estadoFiltro.length > 0 && !estadoFiltro.includes(e.estado))
         return false
       if (programaFiltro.length > 0) {
@@ -93,52 +102,265 @@ export function BackofficeList() {
       }
       return true
     })
-  }, [expedientes, estadoFiltro, programaFiltro, soloPendientesImagen, busqueda])
+  }, [expedientes, tipoFiltro, estadoFiltro, programaFiltro, soloPendientesImagen, busqueda])
 
   const onLogout = async () => {
     await supabase.auth.signOut()
     navigate('/', { replace: true })
   }
 
-  const onExportar = async () => {
+  // Describe la selección actual para el log "pdf_generado".
+  const describeSeleccion = () => {
+    const tipos = new Set(filtrados.map((e) => e.tipo))
+    const programas = new Set(
+      filtrados
+        .map((e) => e.programa)
+        .filter((p): p is NonNullable<typeof p> => p !== null)
+    )
+    return {
+      tipoSel:
+        tipos.size === 0
+          ? 'ninguno'
+          : tipos.size === 1
+            ? Array.from(tipos)[0] + 's'
+            : 'todos',
+      programaSel:
+        programas.size === 0
+          ? 'sin-programa'
+          : programas.size === 1
+            ? Array.from(programas)[0]
+            : 'todos',
+      n: filtrados.length,
+    }
+  }
+
+  const logPdfGenerado = async (docKind: string) => {
+    await registrarEvento(
+      null,
+      'pdf_generado',
+      { doc: docKind, ...describeSeleccion() },
+      staffEmail
+    )
+  }
+
+  const onPdfCocinero = async () => {
     setExportando(true)
     try {
-      await exportarExcel(filtrados, edicion, edicion?.nombre ?? 'expedientes')
+      await exportarPdfCocinero(filtrados, edicion)
+      await logPdfGenerado('cocinero')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al exportar')
+      setError(e instanceof Error ? e.message : 'Error al generar PDF')
     } finally {
       setExportando(false)
     }
   }
 
-  const onDocxCocinero = async () => {
+  const pagadasNoEnviadas = useMemo(
+    () =>
+      filtrados.filter(
+        (e) =>
+          e.tipo === 'estudiante' &&
+          e.pagado_at &&
+          !e.formulario_enviado_at &&
+          (e.tutor_email ?? '').trim().length > 0
+      ),
+    [filtrados]
+  )
+
+  const toggleSeleccion = (id: string) => {
+    setSeleccion((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Expedientes seleccionados que son estudiantes (las acciones no aplican a
+  // staff). Pre-computado para los botones de acción.
+  const seleccionEstudiantes = useMemo(
+    () =>
+      filtrados.filter(
+        (e) => seleccion.has(e.id) && e.tipo === 'estudiante'
+      ),
+    [filtrados, seleccion]
+  )
+
+  const seleccionMarcables = useMemo(
+    () => seleccionEstudiantes.filter((e) => !e.pagado_at),
+    [seleccionEstudiantes]
+  )
+
+  const seleccionEnviables = useMemo(
+    () =>
+      seleccionEstudiantes.filter(
+        (e) =>
+          !e.formulario_enviado_at && (e.tutor_email ?? '').trim().length > 0
+      ),
+    [seleccionEstudiantes]
+  )
+
+  const onMarcarPagadoSeleccionadas = async () => {
+    if (seleccionMarcables.length === 0) return
+    setMarcandoPagado(true)
+    setError(null)
+    setInfo(null)
+    const ahora = new Date().toISOString()
+    const idsAfectados = seleccionMarcables.map((e) => e.id)
+    // Optimistic
+    setExpedientes((curr) =>
+      curr
+        ? curr.map((x) =>
+            idsAfectados.includes(x.id)
+              ? { ...x, pagado_at: ahora, pagado_por: staffEmail }
+              : x
+          )
+        : curr
+    )
+    let fallos = 0
+    for (const id of idsAfectados) {
+      try {
+        await marcarPagado(id, true, staffEmail)
+      } catch {
+        fallos++
+      }
+    }
+    if (fallos > 0) {
+      setError(
+        `Se marcaron ${idsAfectados.length - fallos} de ${idsAfectados.length}. Fallaron ${fallos}.`
+      )
+      // En caso de fallo parcial, recargamos para reflejar estado real
+    } else {
+      setInfo(`Marcados como pagados: ${idsAfectados.length}`)
+    }
+    setSeleccion(new Set())
+    setMarcandoPagado(false)
+  }
+
+  const onEnviarSinPago = async () => {
+    if (seleccionEnviables.length === 0) return
+    setEnviandoSinPago(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const redirectTo = `${window.location.origin}/callback`
+      const res = await enviarFormularioAExpedientes(
+        seleccionEnviables,
+        redirectTo,
+        staffEmail
+      )
+      const okIds = new Set(res.filter((r) => r.ok).map((r) => r.expedienteId))
+      const ahora = new Date().toISOString()
+      setExpedientes((curr) =>
+        curr
+          ? curr.map((x) =>
+              okIds.has(x.id)
+                ? {
+                    ...x,
+                    formulario_enviado_at: ahora,
+                    formulario_enviado_por: staffEmail,
+                  }
+                : x
+          )
+          : curr
+      )
+      // Marcamos en log con payload "bypass_pago: true" para distinguir en
+      // auditoría de los envíos del flujo estricto.
+      for (const id of Array.from(okIds)) {
+        registrarEvento(
+          id,
+          'formulario_enviado',
+          { bypass_pago: true, por: staffEmail },
+          staffEmail
+        ).catch(() => {})
+      }
+      const ok = res.filter((r) => r.ok).length
+      const fallos = res.filter((r) => !r.ok)
+      if (fallos.length === 0) {
+        setInfo(`Formulario enviado (sin requerir pago) a ${ok} familia(s).`)
+      } else {
+        setError(
+          `Se enviaron ${ok}, fallaron ${fallos.length}: ${fallos
+            .map((f) => `${f.email || '(sin email)'} → ${f.error}`)
+            .join('; ')}`
+        )
+      }
+      setSeleccion(new Set())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al enviar')
+    } finally {
+      setEnviandoSinPago(false)
+    }
+  }
+
+  const onEnviarFormulario = async () => {
+    if (pagadasNoEnviadas.length === 0) return
+    setEnviandoForm(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const redirectTo = `${window.location.origin}/callback`
+      const res = await enviarFormularioAExpedientes(
+        pagadasNoEnviadas,
+        redirectTo,
+        staffEmail
+      )
+      const okIds = new Set(res.filter((r) => r.ok).map((r) => r.expedienteId))
+      const ahora = new Date().toISOString()
+      setExpedientes((curr) =>
+        curr
+          ? curr.map((x) =>
+              okIds.has(x.id)
+                ? {
+                    ...x,
+                    formulario_enviado_at: ahora,
+                    formulario_enviado_por: staffEmail,
+                  }
+                : x
+            )
+          : curr
+      )
+      const ok = res.filter((r) => r.ok).length
+      const fallos = res.filter((r) => !r.ok)
+      if (fallos.length === 0) {
+        setInfo(`Formulario enviado a ${ok} familia(s).`)
+      } else {
+        setError(
+          `Se enviaron ${ok}, fallaron ${fallos.length}: ${fallos
+            .map((f) => `${f.email || '(sin email)'} → ${f.error}`)
+            .join('; ')}`
+        )
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al enviar')
+    } finally {
+      setEnviandoForm(false)
+    }
+  }
+
+  const onPdfMedico = async () => {
     setExportando(true)
     try {
-      await exportarDocxCocinero(filtrados, edicion)
+      await exportarPdfMedico(filtrados, edicion)
+      await logPdfGenerado('medico')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al generar .docx')
+      setError(e instanceof Error ? e.message : 'Error al generar PDF')
     } finally {
       setExportando(false)
     }
   }
 
-  const onDocxStaff = async () => {
+  const onPdfLog = async () => {
     setExportando(true)
     try {
-      await exportarDocxStaff(filtrados, edicion)
+      const [formularios, pdfs] = await Promise.all([
+        listarFormulariosEnviados(),
+        listarPdfsGenerados(),
+      ])
+      await exportarPdfLog(formularios, pdfs, edicion)
+      // No registramos este evento para no meter el log dentro de sí mismo.
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al generar .docx')
-    } finally {
-      setExportando(false)
-    }
-  }
-
-  const onDocxSanitario = async () => {
-    setExportando(true)
-    try {
-      await exportarDocxSanitario(filtrados, edicion)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al generar .docx')
+      setError(e instanceof Error ? e.message : 'Error al generar log')
     } finally {
       setExportando(false)
     }
@@ -180,6 +402,18 @@ export function BackofficeList() {
             >
               + Invitar familias
             </Link>
+            <Link
+              to="/admin/staff/nuevo"
+              className="text-sm font-medium text-slate-900 hover:underline"
+            >
+              + Añadir staff
+            </Link>
+            <Link
+              to="/admin/recordatorios"
+              className="text-sm font-medium text-slate-900 hover:underline"
+            >
+              ✉ Recordatorios
+            </Link>
             <button
               onClick={onLogout}
               className="text-sm text-slate-600 hover:text-slate-900"
@@ -195,38 +429,76 @@ export function BackofficeList() {
           <h1 className="text-2xl font-semibold text-slate-900">
             Expedientes ({filtrados.length})
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              onClick={onExportar}
-              disabled={exportando || filtrados.length === 0}
+              onClick={onMarcarPagadoSeleccionadas}
+              disabled={marcandoPagado || seleccionMarcables.length === 0}
+              title={
+                seleccionMarcables.length === 0
+                  ? 'Selecciona alguna fila aún no pagada para marcarla'
+                  : `Marcar como pagado ${seleccionMarcables.length} expediente(s)`
+              }
               className="text-sm font-medium rounded-lg bg-emerald-700 text-white px-3 py-1.5 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {exportando ? '…' : '↓ Excel'}
+              {marcandoPagado
+                ? '…'
+                : `✓ Marcar pagado (${seleccionMarcables.length})`}
             </button>
             <button
               type="button"
-              onClick={onDocxCocinero}
-              disabled={exportando || filtrados.length === 0}
-              className="text-sm font-medium rounded-lg bg-slate-900 text-white px-3 py-1.5 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={onEnviarFormulario}
+              disabled={enviandoForm || pagadasNoEnviadas.length === 0}
+              title={
+                pagadasNoEnviadas.length === 0
+                  ? 'Marca como "Pagado" alguna familia que aún no haya recibido el formulario'
+                  : `Enviar el magic link a ${pagadasNoEnviadas.length} familia(s) pagada(s) y aún no contactada(s)`
+              }
+              className="text-sm font-medium rounded-lg bg-blue-700 text-white px-3 py-1.5 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {exportando ? '…' : '↓ Cocinero (.docx)'}
+              {enviandoForm
+                ? '…'
+                : `↗ Enviar formulario (${pagadasNoEnviadas.length})`}
             </button>
             <button
               type="button"
-              onClick={onDocxStaff}
-              disabled={exportando || filtrados.length === 0}
-              className="text-sm font-medium rounded-lg bg-slate-900 text-white px-3 py-1.5 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={onEnviarSinPago}
+              disabled={enviandoSinPago || seleccionEnviables.length === 0}
+              title={
+                seleccionEnviables.length === 0
+                  ? 'Selecciona expedientes aún no enviados para mandarles el formulario sin requerir pago previo'
+                  : `Enviar formulario a ${seleccionEnviables.length} familia(s) seleccionada(s) — sin requerir pago`
+              }
+              className="text-sm font-medium rounded-lg bg-white text-slate-700 border border-slate-300 px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {exportando ? '…' : '↓ Staff (.docx)'}
+              {enviandoSinPago
+                ? '…'
+                : `↗ Enviar sin pago (${seleccionEnviables.length})`}
             </button>
             <button
               type="button"
-              onClick={onDocxSanitario}
+              onClick={onPdfCocinero}
               disabled={exportando || filtrados.length === 0}
               className="text-sm font-medium rounded-lg bg-slate-900 text-white px-3 py-1.5 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {exportando ? '…' : '↓ Sanitario (.docx)'}
+              {exportando ? '…' : '↓ Cocinero (PDF)'}
+            </button>
+            <button
+              type="button"
+              onClick={onPdfMedico}
+              disabled={exportando || filtrados.length === 0}
+              className="text-sm font-medium rounded-lg bg-slate-900 text-white px-3 py-1.5 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exportando ? '…' : '↓ Médico (PDF)'}
+            </button>
+            <button
+              type="button"
+              onClick={onPdfLog}
+              disabled={exportando}
+              title="Histórico completo de envíos de formulario y generaciones de PDF"
+              className="text-sm font-medium rounded-lg bg-slate-100 text-slate-700 border border-slate-300 px-3 py-1.5 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exportando ? '…' : '↓ Log (PDF)'}
             </button>
           </div>
         </div>
@@ -241,6 +513,41 @@ export function BackofficeList() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
           <div className="space-y-2">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                Tipo
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { v: 'estudiante', label: 'Estudiantes' },
+                    { v: 'staff', label: 'Staff' },
+                  ] as const
+                ).map((t) => {
+                  const activo = tipoFiltro.includes(t.v)
+                  return (
+                    <button
+                      key={t.v}
+                      type="button"
+                      onClick={() =>
+                        setTipoFiltro((cur) =>
+                          activo
+                            ? cur.filter((s) => s !== t.v)
+                            : [...cur, t.v]
+                        )
+                      }
+                      className={`text-xs px-2.5 py-1 rounded-full border ${
+                        activo
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">
                 Estado
@@ -280,7 +587,6 @@ export function BackofficeList() {
                   [
                     { v: 'robotica', label: 'Robótica' },
                     { v: 'emprendimiento', label: 'Emprendimiento' },
-                    { v: 'sin_programa', label: 'Sin programa' },
                   ] as const
                 ).map((p) => {
                   const activo = programaFiltro.includes(p.v)
@@ -325,6 +631,7 @@ export function BackofficeList() {
             </div>
             {(estadoFiltro.length > 0 ||
               programaFiltro.length > 0 ||
+              tipoFiltro.length > 0 ||
               soloPendientesImagen ||
               busqueda) && (
               <button
@@ -332,6 +639,7 @@ export function BackofficeList() {
                 onClick={() => {
                   setEstadoFiltro([])
                   setProgramaFiltro([])
+                  setTipoFiltro([])
                   setSoloPendientesImagen(false)
                   setBusqueda('')
                 }}
@@ -348,6 +656,11 @@ export function BackofficeList() {
             {error}
           </div>
         )}
+        {info && (
+          <div className="rounded-lg bg-emerald-50 text-emerald-800 text-sm p-3">
+            {info}
+          </div>
+        )}
 
         {expedientes === null ? (
           <div className="text-slate-500 text-sm">Cargando…</div>
@@ -360,6 +673,7 @@ export function BackofficeList() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-2.5">Pagado</th>
                   <th className="px-4 py-2.5">Estado</th>
                   <th className="px-4 py-2.5">Programa</th>
                   <th className="px-4 py-2.5">Participante</th>
@@ -374,6 +688,51 @@ export function BackofficeList() {
                     key={e.id}
                     className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
                   >
+                    <td className="px-4 py-3 align-top">
+                      {e.tipo === 'staff' ? (
+                        <span className="text-xs text-slate-400">—</span>
+                      ) : (
+                        <div className="space-y-1">
+                          {/* Checkbox de SELECCIÓN. Sigue activo aunque la fila
+                              ya esté pagada/enviada — para coherencia visual,
+                              aunque los botones de acción la ignoren. */}
+                          <input
+                            type="checkbox"
+                            aria-label="Seleccionar"
+                            checked={seleccion.has(e.id)}
+                            onChange={() => toggleSeleccion(e.id)}
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          {/* Badges de estado, no interactivos */}
+                          {e.pagado_at && (
+                            <div className="text-[10px] font-medium text-emerald-700">
+                              ✓ Pagado{' '}
+                              {new Date(e.pagado_at).toLocaleDateString(
+                                'es-ES',
+                                { day: '2-digit', month: '2-digit' }
+                              )}
+                            </div>
+                          )}
+                          {e.formulario_enviado_at && (
+                            <div className="text-[10px] font-medium text-blue-700">
+                              Form enviado{' '}
+                              {new Date(
+                                e.formulario_enviado_at
+                              ).toLocaleDateString('es-ES', {
+                                day: '2-digit',
+                                month: '2-digit',
+                              })}
+                            </div>
+                          )}
+                          {!e.pagado_at &&
+                            (e.tutor_email ?? '').trim().length === 0 && (
+                              <div className="text-[10px] font-medium text-red-700">
+                                ⚠ Sin email de tutor
+                              </div>
+                            )}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -409,6 +768,20 @@ export function BackofficeList() {
                             className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300"
                           >
                             ⚠ Imagen
+                          </span>
+                        )}
+                        {e.modificado_postenvio_at && (
+                          <span
+                            title={`La familia modificó el formulario tras enviarlo el ${new Date(e.modificado_postenvio_at).toLocaleString('es-ES')}`}
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300"
+                          >
+                            ✎ Modificado{' '}
+                            {new Date(
+                              e.modificado_postenvio_at
+                            ).toLocaleDateString('es-ES', {
+                              day: '2-digit',
+                              month: '2-digit',
+                            })}
                           </span>
                         )}
                       </div>

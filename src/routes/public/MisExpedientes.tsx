@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useSession } from '../../lib/useSession'
 import { useStaffStatus } from '../../lib/useStaffStatus'
+import { useClientaStatus } from '../../lib/useClientaStatus'
 import {
   crearExpediente,
   listarExpedientes,
@@ -30,6 +31,7 @@ const estadoLabel: Record<string, string> = {
 export function MisExpedientes() {
   const session = useSession()
   const staff = useStaffStatus()
+  const clienta = useClientaStatus()
   const navigate = useNavigate()
   const [expedientes, setExpedientes] = useState<Expediente[] | null>(null)
   const [creating, setCreating] = useState(false)
@@ -101,6 +103,7 @@ export function MisExpedientes() {
 
   // Los admins NO ven esta página. Redirección inmediata y sin parpadeo.
   if (staff.status === 'staff') return <Navigate to="/admin" replace />
+  if (clienta.status === 'clienta') return <Navigate to="/clienta" replace />
 
   return (
     <div className="min-h-screen bg-slate-50">

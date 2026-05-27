@@ -50,6 +50,9 @@ export function Seccion7Revision({
   const faltantes: CampoFaltante[] = validarParaEnvio(expediente)
   const firmasNecesarias = firmasRequeridas(expediente)
 
+  const esModificacion =
+    !!expediente.submitted_at && !!expediente.modificado_postenvio_at
+
   const tutorNombre = expediente.tutor_nombre ?? ''
   const alumnoNombre = `${expediente.alumno_nombre ?? ''} ${
     expediente.alumno_apellidos ?? ''
@@ -106,23 +109,37 @@ export function Seccion7Revision({
         })
       }
 
-      // Actualizar expediente
+      // Actualizar expediente. Si es una modificación postenvío, no movemos
+      // el estado ni submitted_at — solo limpiamos `modificado_postenvio_at`
+      // para que admin/familia sepan que los cambios están confirmados.
       const nuevasRespuestas = {
         ...(expediente.respuestas ?? {}),
         seccion7: {
+          ...((expediente.respuestas?.seccion7 as object | undefined) ?? {}),
           firma_nino_nombre: ninoNombre.trim(),
-          enviado_at: ahora,
+          ...(esModificacion
+            ? { modificacion_confirmada_at: ahora }
+            : { enviado_at: ahora }),
         },
       }
-      await actualizarExpediente(expediente.id, {
-        estado: 'enviado',
-        submitted_at: ahora,
-        respuestas: nuevasRespuestas,
-      })
-
-      await registrarEvento(expediente.id, 'formulario_enviado', {
-        firmas: firmasNecesarias.map((f) => f.tipo),
-      })
+      if (esModificacion) {
+        await actualizarExpediente(expediente.id, {
+          modificado_postenvio_at: null,
+          respuestas: nuevasRespuestas,
+        })
+        await registrarEvento(expediente.id, 'modificacion_confirmada', {
+          firmas: firmasNecesarias.map((f) => f.tipo),
+        })
+      } else {
+        await actualizarExpediente(expediente.id, {
+          estado: 'enviado',
+          submitted_at: ahora,
+          respuestas: nuevasRespuestas,
+        })
+        await registrarEvento(expediente.id, 'formulario_enviado', {
+          firmas: firmasNecesarias.map((f) => f.tipo),
+        })
+      }
 
       onEnviado()
     } catch (e) {
@@ -145,13 +162,20 @@ export function Seccion7Revision({
     <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-8">
       <div>
         <h2 className="text-xl font-semibold text-slate-900">
-          Revisión y envío
+          {esModificacion ? 'Revisión y confirmación' : 'Revisión y envío'}
         </h2>
         <p className="text-slate-600 text-sm mt-1">
-          Comprueba el resumen, firma los documentos que aplican y envía el
-          formulario.
+          {esModificacion
+            ? 'Has hecho cambios después de enviar. Vuelve a firmar para confirmar las modificaciones.'
+            : 'Comprueba el resumen, firma los documentos que aplican y envía el formulario.'}
         </p>
       </div>
+      {esModificacion && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm p-3">
+          ✎ Modo modificación. Tu formulario está enviado; al confirmar, los
+          cambios quedarán definitivos y se notificará al equipo del Campus.
+        </div>
+      )}
 
       {/* Resumen rápido */}
       <Bloque>
@@ -281,9 +305,19 @@ export function Seccion7Revision({
           type="button"
           onClick={onSubmit}
           disabled={enviando || !puedeEnviar}
-          className="rounded-lg bg-emerald-700 text-white font-medium px-4 py-2.5 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          className={
+            esModificacion
+              ? 'rounded-lg bg-amber-700 text-white font-medium px-4 py-2.5 hover:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed'
+              : 'rounded-lg bg-emerald-700 text-white font-medium px-4 py-2.5 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed'
+          }
         >
-          {enviando ? 'Enviando…' : 'Enviar formulario'}
+          {enviando
+            ? esModificacion
+              ? 'Confirmando…'
+              : 'Enviando…'
+            : esModificacion
+              ? 'Confirmar cambios'
+              : 'Enviar formulario'}
         </button>
       </div>
       {!puedeEnviar && (

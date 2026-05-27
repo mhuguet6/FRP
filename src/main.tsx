@@ -10,6 +10,11 @@ import { FormularioExpediente } from './features/expediente/FormularioExpediente
 import { BackofficeList } from './routes/backoffice/BackofficeList'
 import { BackofficeDetalle } from './routes/backoffice/BackofficeDetalle'
 import { BackofficeInvitaciones } from './routes/backoffice/BackofficeInvitaciones'
+import { AdminNuevoStaff } from './routes/backoffice/AdminNuevoStaff'
+import { AdminRecordatorios } from './routes/backoffice/AdminRecordatorios'
+import { ClientaDashboard } from './routes/clienta/ClientaDashboard'
+import { ClientaNuevoNino } from './routes/clienta/ClientaNuevoNino'
+import { ClientaImportarExcel } from './routes/clienta/ClientaImportarExcel'
 import { RequireAuth } from './components/RequireAuth'
 
 const router = createBrowserRouter([
@@ -49,10 +54,58 @@ const router = createBrowserRouter([
     ),
   },
   {
+    path: '/admin/expediente/:id/editar',
+    element: (
+      <RequireAuth>
+        <FormularioExpediente modoAdmin />
+      </RequireAuth>
+    ),
+  },
+  {
     path: '/admin/invitaciones',
     element: (
       <RequireAuth>
         <BackofficeInvitaciones />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/admin/staff/nuevo',
+    element: (
+      <RequireAuth>
+        <AdminNuevoStaff />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/admin/recordatorios',
+    element: (
+      <RequireAuth>
+        <AdminRecordatorios />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/clienta',
+    element: (
+      <RequireAuth>
+        <ClientaDashboard />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/clienta/nuevo',
+    element: (
+      <RequireAuth>
+        <ClientaNuevoNino />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/clienta/importar',
+    element: (
+      <RequireAuth>
+        <ClientaImportarExcel />
       </RequireAuth>
     ),
   },

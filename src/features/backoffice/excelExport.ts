@@ -53,11 +53,21 @@ function fmtFecha(iso: string | null | undefined): string {
   })
 }
 
+function fmtHorarioMed(m: R): string {
+  const horarios = Array.isArray(m.horarios) ? (m.horarios as string[]) : []
+  const partes: string[] = []
+  if (horarios.length > 0) partes.push(horarios.join(', '))
+  if (m.prn === true) partes.push('según necesidad')
+  if (partes.length > 0) return partes.join(' + ')
+  // Fallback al campo libre antiguo si existiera.
+  return typeof m.frecuencia === 'string' ? m.frecuencia.trim() : ''
+}
+
 function fmtMedicamentos(lista: Array<R> | undefined): string {
   if (!lista?.length) return ''
   return lista
     .map((m) => {
-      const parts = [m.nombre, m.dosis, m.frecuencia].filter(
+      const parts = [m.nombre, m.dosis, fmtHorarioMed(m)].filter(
         (p) => p && String(p).trim()
       )
       const indic = m.indicaciones ? ` [${m.indicaciones}]` : ''
@@ -467,7 +477,16 @@ export async function exportarExcel(
   a.href = url
   const fecha = new Date().toISOString().slice(0, 10)
   const slug = nombreEdicion.replace(/\s+/g, '-').toLowerCase()
-  a.download = `${slug}-${fecha}.xlsx`
+  // Detectamos programa(s) en el filtro actual para reflejarlo en el nombre.
+  const progs = new Set<string>()
+  for (const e of expedientes) if (e.programa) progs.add(e.programa)
+  const slugProg =
+    progs.size === 0
+      ? 'sin-programa'
+      : progs.size === 1
+        ? Array.from(progs)[0]
+        : 'todos'
+  a.download = `${slug}-${slugProg}-${fecha}.xlsx`
   a.click()
   URL.revokeObjectURL(url)
 }
