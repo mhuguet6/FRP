@@ -32,8 +32,13 @@ export function Seccion7Revision({
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const previoS7 = (expediente.respuestas?.seccion7 as any) ?? {}
+  // Pre-rellenamos con el nombre del niño/a que la familia ya escribió en
+  // S1 (o que la clienta cargó). Si ya hay un valor guardado en S7, prevalece.
+  const nombreSugerido = `${expediente.alumno_nombre ?? ''} ${
+    expediente.alumno_apellidos ?? ''
+  }`.trim()
   const [ninoNombre, setNinoNombre] = useState<string>(
-    previoS7.firma_nino_nombre ?? ''
+    previoS7.firma_nino_nombre ?? nombreSugerido
   )
 
   const refDatosImagen = useRef<SignatureCanvasHandle>(null)
@@ -273,8 +278,9 @@ export function Seccion7Revision({
             Nombre del/de la participante
           </div>
           <p className="text-xs text-slate-600">
-            Pide a tu hijo/a que escriba aquí su nombre completo en señal de que
-            ha leído o se le ha explicado el decálogo y el reglamento.
+            Verifica con tu hijo/a que el nombre es correcto. Su presencia aquí
+            confirma que ha leído o se le ha explicado el decálogo y el
+            reglamento. Puedes corregirlo si hay alguna errata.
           </p>
           <input
             type="text"

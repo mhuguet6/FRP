@@ -52,7 +52,10 @@ export function FileUpload({
     if (!file) return
     const maxMb = Math.round(maxBytes / 1024 / 1024)
     if (file.size > maxBytes) {
-      setError(`El archivo no puede pesar más de ${maxMb} MB.`)
+      const mb = (file.size / 1024 / 1024).toFixed(1)
+      setError(
+        `Eh, máximo ${maxMb} MB. Este archivo pesa ${mb} MB y es demasiado grande.`
+      )
       return
     }
     setError(null)

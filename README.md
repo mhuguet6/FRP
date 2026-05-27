@@ -108,13 +108,13 @@ Pulsar el botón limpia `pagado_at` y `pagado_por`, registra un evento `pago_rev
 2. Pulsa el enlace → llega a `/callback` → la función `reclamar_invitaciones()` enlaza su `user_id` al expediente que la clienta ya creó (sin duplicar).
 3. Si tiene un solo hijo, va directa al formulario. Con varios, ve la lista en `/mis-expedientes`.
 4. Rellena las **7 secciones** con autosave cada 1.5s + flush al desmontar:
-   1. **Datos del participante** — foto obligatoria, nombre, apellidos, fecha nac (edad calculada), dirección. Pre-rellenadas por la clienta; la familia puede corregir.
+   1. **Datos del participante** — foto obligatoria (máximo 10 MB, formato imagen), nombre, apellidos, fecha nac (edad calculada), dirección. Pre-rellenadas por la clienta; la familia puede corregir.
    2. **Familia y contactos** — tutor que firma, DNI/NIE con regex, email editable, hasta 3 personas de contacto con **selector de prefijo internacional** (España default + 14 países).
-   3. **Salud** — 14 bloques (alergias, antecedentes, mareos, alimentación con peso numérico, patologías, COVID, discapacidad, movilidad, motricidad, gafas, miedos, carácter, atención especial, vacunación con upload de certificado opcional).
-   4. **Medicación** — habitual + durante Campus. Cada medicamento tiene nombre, dosis, **selector de horas** (chips toggleables 07:00–22:00) y opción "según necesidad" (PRN). Receta médica adjunta obligatoria si toma medicación en el Campus.
+   3. **Salud** — 14 bloques (alergias, antecedentes, mareos, alimentación con peso numérico, patologías, COVID, discapacidad, movilidad, motricidad, gafas, miedos, carácter, atención especial, vacunación con upload de certificado opcional —imagen o PDF, hasta 10 MB—).
+   4. **Medicación** — habitual + durante Campus. Cada medicamento tiene nombre, dosis, **selector de horas** (chips toggleables 07:00–22:00) y opción "según necesidad" (PRN). Receta médica adjunta obligatoria si toma medicación en el Campus (imagen o PDF, hasta 10 MB).
    5. **Conociéndote** — 36 preguntas para el participante y la familia, dos extras condicionales si el programa es Emprendimiento.
    6. **Autorizaciones y normas** — comunicaciones de la Fundación, derechos de imagen (Sí/No con info pre-decisión y recordatorio suave si dice No), observaciones, agua/natación, llamada con familias, decálogo, reglamento.
-   7. **Revisión y firmas** — resumen, lista de faltantes con enlaces, hasta 4 firmas manuscritas + nombre del participante, envío final.
+   7. **Revisión y firmas** — resumen, lista de faltantes con enlaces, hasta 4 firmas manuscritas + nombre del participante (pre-rellenado con `alumno_nombre + alumno_apellidos`, editable), envío final.
 5. Al enviar, `estado='enviado'` y `submitted_at = now()`.
 
 ### Fase 3b — Modificación posterior al envío (familia)
@@ -215,6 +215,11 @@ Paralelamente al flujo de niños, el admin puede dar de alta miembros del equipo
 - **Formulario de 7 secciones** con autosave 1.5s + flush al desmontar + indicador visual.
 - **Selector de prefijo telefónico internacional** (España default, 14 países más).
 - **Selector de horas** para medicación (07:00–22:00) + opción "según necesidad" (PRN).
+- **Subida de archivos**: foto del niño (imagen, máx. 10 MB) + certificado vacunación y receta médica (imagen o PDF, máx. 10 MB cada uno). Mensaje de error claro si supera el tamaño ("Eh, máximo 10 MB. Este archivo pesa X.X MB y es demasiado grande.").
+- **Pre-rellenos automáticos** para evitar tipear lo mismo dos veces:
+  - S1: nombre, apellidos, fecha nac, dirección (de lo que cargó la clienta).
+  - S2: email del tutor (del que recibió el magic link).
+  - S7: nombre del participante para la "firma del niño" (de S1, editable por si hay errata).
 - Validación estricta al pulsar Siguiente. Banner de error si faltan respuestas.
 - Estado `requiere_correccion` desbloquea edición para corregir y reenviar (workflow del admin).
 - **Modificación tras envío** (Fase 3b): botón "✎ Modificar formulario" en `ExpedienteEnviadoView`. Cualquier cambio bumpea `modificado_postenvio_at` y exige re-firma en Sección 7.

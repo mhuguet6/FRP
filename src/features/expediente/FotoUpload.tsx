@@ -11,7 +11,7 @@ type Props = {
   onChange: (path: string | null) => void
 }
 
-const MAX_BYTES = 5 * 1024 * 1024
+const MAX_BYTES = 10 * 1024 * 1024
 
 export function FotoUpload({ expedienteId, fotoPath, onChange }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -46,7 +46,10 @@ export function FotoUpload({ expedienteId, fotoPath, onChange }: Props) {
       return
     }
     if (file.size > MAX_BYTES) {
-      setError('La imagen no puede pesar más de 5 MB.')
+      const mb = (file.size / 1024 / 1024).toFixed(1)
+      setError(
+        `Eh, máximo 10 MB. Este archivo pesa ${mb} MB y es demasiado grande.`
+      )
       return
     }
     setError(null)
