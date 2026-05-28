@@ -44,13 +44,6 @@ const schema = z.object({
   reglamento_entiendo_consecuencias: debeSerCierto,
 
   observaciones_generales: noSiTexto,
-
-  // El nombre del participante se escribe como acto de aceptación tras la
-  // firma del tutor. La firma manuscrita se gestiona vía canvas externo y
-  // se sube a Storage en `onValid`.
-  firma_nino_nombre: z
-    .string()
-    .min(1, 'El/la participante debe escribir su nombre'),
 })
 
 export type Seccion6Values = z.infer<typeof schema>
@@ -91,11 +84,6 @@ export function Seccion6Autorizaciones({
         previo.reglamento_entiendo_consecuencias ?? false,
       observaciones_generales:
         previo.observaciones_generales ?? { respuesta: undefined, detalle: '' },
-      firma_nino_nombre:
-        previo.firma_nino_nombre ??
-        `${expediente.alumno_nombre ?? ''} ${
-          expediente.alumno_apellidos ?? ''
-        }`.trim(),
     },
   })
 
@@ -103,6 +91,7 @@ export function Seccion6Autorizaciones({
   const values = watch()
 
   const firmaRef = useRef<SignatureCanvasHandle>(null)
+  const firmaNinoRef = useRef<SignatureCanvasHandle>(null)
   const [enviandoFirma, setEnviandoFirma] = useState(false)
 
   const saveStatus = useAutosave({
@@ -120,32 +109,54 @@ export function Seccion6Autorizaciones({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const onValid = async () => {
     setSubmitError(null)
-    const ref = firmaRef.current
-    if (!ref || ref.isEmpty()) {
+    const refTutor = firmaRef.current
+    const refNino = firmaNinoRef.current
+    if (!refTutor || refTutor.isEmpty()) {
       setSubmitError(
         'Falta la firma del tutor/a conformidad con el decálogo y el reglamento.'
       )
       return
     }
+    if (!refNino || refNino.isEmpty()) {
+      setSubmitError(
+        'Falta la firma del/de la participante conformidad con el decálogo y el reglamento.'
+      )
+      return
+    }
     setEnviandoFirma(true)
     try {
-      const blob = await ref.toBlob()
-      if (!blob) throw new Error('No se pudo generar la firma')
       const ahora = new Date().toISOString()
-      const texto = textoAutorizacion('reglamento_tutor', {
-        alumnoNombre: alumnoNombre || '[participante]',
-        timestamp: ahora,
-      })
+
+      // Firma del tutor
+      const blobTutor = await refTutor.toBlob()
+      if (!blobTutor) throw new Error('No se pudo generar la firma del tutor')
       await subirYRegistrarFirma({
         expedienteId: expediente.id,
         tipo: 'reglamento_tutor',
-        blob,
+        blob: blobTutor,
         firmadoPor: expediente.tutor_email ?? 'tutor/a firmante',
-        textoAutorizacion: texto,
+        textoAutorizacion: textoAutorizacion('reglamento_tutor', {
+          alumnoNombre: alumnoNombre || '[participante]',
+          timestamp: ahora,
+        }),
+      })
+
+      // Firma del niño/a
+      const blobNino = await refNino.toBlob()
+      if (!blobNino) throw new Error('No se pudo generar la firma del/de la participante')
+      await subirYRegistrarFirma({
+        expedienteId: expediente.id,
+        tipo: 'reglamento_nino',
+        blob: blobNino,
+        firmadoPor: alumnoNombre || 'participante',
+        textoAutorizacion: textoAutorizacion('reglamento_nino', {
+          alumnoNombre: alumnoNombre || '[participante]',
+          timestamp: ahora,
+        }),
       })
     } catch (e) {
       setSubmitError(
-        e instanceof Error ? e.message : 'No se pudo guardar la firma'
+        e instanceof Error ? e.message : 'No se pudieron guardar las firmas'
       )
       setEnviandoFirma(false)
       return
@@ -193,6 +204,7 @@ export function Seccion6Autorizaciones({
           />
           <span className="text-sm text-slate-800">
             He leído y entiendo el decálogo de convivencia del Campus FRP.
+            <span className="text-red-600 ml-0.5">*</span>
           </span>
         </label>
         {errors.decalogo_leido?.message && (
@@ -229,6 +241,7 @@ export function Seccion6Autorizaciones({
               />
               <span className="text-sm text-slate-800">
                 He leído y entiendo el reglamento interno de los participantes.
+                <span className="text-red-600 ml-0.5">*</span>
               </span>
             </label>
             {errors.reglamento_leido?.message && (
@@ -245,6 +258,7 @@ export function Seccion6Autorizaciones({
               <span className="text-sm text-slate-800">
                 Acepto que el/la participante debe cumplir las normas de
                 convivencia del Campus FRP.
+                <span className="text-red-600 ml-0.5">*</span>
               </span>
             </label>
             {errors.reglamento_acepto_normas?.message && (
@@ -261,6 +275,7 @@ export function Seccion6Autorizaciones({
               <span className="text-sm text-slate-800">
                 Entiendo que el incumplimiento de estas normas puede tener
                 consecuencias según la gravedad de la falta.
+                <span className="text-red-600 ml-0.5">*</span>
               </span>
             </label>
             {errors.reglamento_entiendo_consecuencias?.message && (
@@ -270,17 +285,18 @@ export function Seccion6Autorizaciones({
         </div>
       </Bloque>
 
-      {/* Firmas: tutor + nombre del participante */}
+      {/* Firmas: tutor + participante */}
       <Bloque>
         <Titulo>Firmas</Titulo>
         <p className="text-sm text-slate-600">
           Firma de conformidad con el decálogo y el reglamento interno del
-          Campus FRP, y firma escrita del/de la participante.
+          Campus FRP, y firma del/de la participante.
         </p>
 
         <div className="rounded-xl border border-slate-200 p-4 space-y-3">
           <div className="text-sm font-semibold text-slate-900">
             Firma del padre/madre/tutor/a
+            <span className="text-red-600 ml-0.5">*</span>
           </div>
           <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
             {textoAutorizacion('reglamento_tutor', {
@@ -301,26 +317,32 @@ export function Seccion6Autorizaciones({
           </button>
         </div>
 
-        <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
           <div className="text-sm font-semibold text-slate-900">
-            Nombre del/de la participante
+            Firma del/de la participante
+            <span className="text-red-600 ml-0.5">*</span>
           </div>
           <p className="text-xs text-slate-600">
-            Verifica con tu hijo/a que el nombre es correcto. Su presencia aquí
-            confirma que ha leído o se le ha explicado el decálogo y el
-            reglamento. Puedes corregirlo si hay alguna errata.
+            Pide a tu hijo/a que firme aquí, como acto de aceptación del
+            decálogo y el reglamento.
           </p>
-          <input
-            type="text"
-            className={inputCls}
-            placeholder="Nombre y apellidos"
-            {...register('firma_nino_nombre')}
+          <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
+            {textoAutorizacion('reglamento_nino', {
+              alumnoNombre: alumnoNombre || '[participante]',
+              timestamp: new Date().toISOString(),
+            })}
+          </div>
+          <SignatureCanvas
+            ref={firmaNinoRef}
+            ariaLabel="Firma del/de la participante"
           />
-          {errors.firma_nino_nombre?.message && (
-            <p className="text-red-600 text-sm">
-              {errors.firma_nino_nombre.message as string}
-            </p>
-          )}
+          <button
+            type="button"
+            onClick={() => firmaNinoRef.current?.clear()}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Limpiar firma
+          </button>
         </div>
       </Bloque>
 
@@ -401,15 +423,18 @@ function Pregunta({ children }: { children: React.ReactNode }) {
 
 function Field({
   label,
+  requerido,
   children,
 }: {
   label: string
+  requerido?: boolean
   children: React.ReactNode
 }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">
         {label}
+        {requerido && <span className="text-red-600 ml-0.5">*</span>}
       </label>
       {children}
     </div>

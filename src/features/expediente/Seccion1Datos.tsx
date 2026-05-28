@@ -24,6 +24,7 @@ const RELACIONES = [
 ] as const
 
 const CURSOS = [
+  '4º Primaria',
   '5º Primaria',
   '6º Primaria',
   '1º ESO',
@@ -60,8 +61,16 @@ const schema = z
     curso: z.enum(CURSOS, { message: 'Selecciona curso' }),
     curso_otro: z.string().optional(),
     // Apartado B — Contacto principal (tutor que firma)
+    nombre_tutor: z.string().min(1, 'Obligatorio'),
     relacion_familiar: z.enum(RELACIONES, { message: 'Selecciona una relación' }),
     telefono: z.string().regex(TELEFONO_REGEX, 'Solo números (9 dígitos)'),
+    telefono_secundario: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || TELEFONO_REGEX.test(v),
+        'Solo números (9 dígitos)'
+      ),
     direccion: z.string().min(1, 'Obligatorio'),
     email: z.string().email('Email no válido'),
     dias_llamada: z
@@ -150,10 +159,12 @@ export function Seccion1Datos({
         expediente.fecha_nacimiento ?? previo.fecha_nacimiento ?? '',
       curso: (previo.curso as Seccion1Values['curso']) ?? undefined,
       curso_otro: previo.curso_otro ?? '',
+      nombre_tutor: previo.nombre_tutor || expediente.tutor_nombre || '',
       relacion_familiar:
         (previo.relacion_familiar as Seccion1Values['relacion_familiar']) ??
         undefined,
       telefono: previo.telefono ?? expediente.tutor_telefono ?? '',
+      telefono_secundario: previo.telefono_secundario ?? '',
       direccion: previo.direccion ?? '',
       email: previo.email ?? expediente.tutor_email ?? '',
       dias_llamada: previo.dias_llamada ?? [],
@@ -180,6 +191,7 @@ export function Seccion1Datos({
           alumno_nombre: v.nombre || null,
           alumno_apellidos: v.apellidos || null,
           fecha_nacimiento: v.fecha_nacimiento || null,
+          tutor_nombre: v.nombre_tutor || null,
           tutor_telefono: v.telefono || null,
           tutor_email: v.email || null,
         },
@@ -244,7 +256,7 @@ export function Seccion1Datos({
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Nombre" error={errors.nombre?.message}>
+          <Field label="Nombre" requerido error={errors.nombre?.message}>
             <input
               type="text"
               autoComplete="given-name"
@@ -252,7 +264,7 @@ export function Seccion1Datos({
               {...register('nombre')}
             />
           </Field>
-          <Field label="Apellidos" error={errors.apellidos?.message}>
+          <Field label="Apellidos" requerido error={errors.apellidos?.message}>
             <input
               type="text"
               autoComplete="family-name"
@@ -264,6 +276,7 @@ export function Seccion1Datos({
 
         <Field
           label="Fecha de nacimiento"
+          requerido
           error={errors.fecha_nacimiento?.message}
         >
           <input
@@ -286,7 +299,7 @@ export function Seccion1Datos({
         </Field>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Curso escolar" error={errors.curso?.message}>
+          <Field label="Curso escolar" requerido error={errors.curso?.message}>
             <select
               className={inputCls}
               defaultValue=""
@@ -301,10 +314,15 @@ export function Seccion1Datos({
                 </option>
               ))}
             </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Indica el curso que tu hijo/a empezará en septiembre, no el que
+              está terminando.
+            </p>
           </Field>
           {cursoSel === 'Otros' && (
             <Field
               label="Especifica el curso"
+              requerido
               error={errors.curso_otro?.message}
             >
               <input
@@ -334,36 +352,64 @@ export function Seccion1Datos({
           Datos del adulto que firma el formulario.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field
-            label="Relación familiar"
-            error={errors.relacion_familiar?.message}
-          >
-            <select
-              className={inputCls}
-              defaultValue=""
-              {...register('relacion_familiar')}
-            >
-              <option value="" disabled>
-                Selecciona…
-              </option>
-              {RELACIONES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Teléfono" error={errors.telefono?.message}>
-            <InputTelefono
-              name="telefono"
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              control={control as Control<any>}
-            />
-          </Field>
-        </div>
+        <Field
+          label="Nombre y apellidos"
+          requerido
+          error={errors.nombre_tutor?.message}
+        >
+          <input
+            type="text"
+            autoComplete="name"
+            placeholder="Nombre completo de quien firma"
+            className={inputCls}
+            {...register('nombre_tutor')}
+          />
+        </Field>
 
-        <Field label="Dirección completa" error={errors.direccion?.message}>
+        <Field
+          label="Relación familiar"
+          requerido
+          error={errors.relacion_familiar?.message}
+        >
+          <select
+            className={inputCls}
+            defaultValue=""
+            {...register('relacion_familiar')}
+          >
+            <option value="" disabled>
+              Selecciona…
+            </option>
+            {RELACIONES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Teléfono" requerido error={errors.telefono?.message}>
+          <InputTelefono
+            name="telefono"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            control={control as Control<any>}
+          />
+        </Field>
+
+        <Field
+          label="Segundo teléfono (opcional)"
+          error={errors.telefono_secundario?.message}
+        >
+          <InputTelefono
+            name="telefono_secundario"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            control={control as Control<any>}
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            Solo se usará si en el primer teléfono no podemos contactaros.
+          </p>
+        </Field>
+
+        <Field label="Dirección completa" requerido error={errors.direccion?.message}>
           <textarea
             rows={2}
             className={inputCls}
@@ -372,7 +418,7 @@ export function Seccion1Datos({
           />
         </Field>
 
-        <Field label="Email" error={errors.email?.message}>
+        <Field label="Email" requerido error={errors.email?.message}>
           <input
             type="email"
             inputMode="email"
@@ -382,7 +428,8 @@ export function Seccion1Datos({
         </Field>
 
         <Field
-          label="Mejor día para llamaros (marca uno o varios)"
+          label="Mejor día para llamaros"
+          requerido
           error={errors.dias_llamada?.message as string | undefined}
         >
           {fechasLlamada.length === 0 ? (
@@ -390,25 +437,35 @@ export function Seccion1Datos({
               Aún no hay fechas configuradas para esta edición.
             </p>
           ) : (
-            <div className="space-y-1.5">
-              {fechasLlamada.map((f) => (
-                <label key={f} className="flex items-center gap-2 cursor-pointer">
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">
+                Las llamadas del Campus se hacen siempre entre las{' '}
+                <strong>19:00 y las 20:00</strong>. Marca qué días os va bien
+                que os llamemos a esa hora.
+              </p>
+              <div className="space-y-1.5">
+                {fechasLlamada.map((f) => (
+                  <label
+                    key={f}
+                    className="flex items-center gap-2 cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      value={f}
+                      {...register('dias_llamada')}
+                    />
+                    <span>{formatearFecha(f)}</span>
+                  </label>
+                ))}
+                <label className="flex items-center gap-2 cursor-pointer border-t border-slate-200 pt-2 mt-1 text-sm">
                   <input
                     type="checkbox"
-                    value={f}
+                    value="cualquiera"
                     {...register('dias_llamada')}
                   />
-                  <span>{formatearFecha(f)}</span>
+                  <span>Cualquier día</span>
                 </label>
-              ))}
-              <label className="flex items-center gap-2 cursor-pointer border-t border-slate-200 pt-1.5 mt-1">
-                <input
-                  type="checkbox"
-                  value="cualquiera"
-                  {...register('dias_llamada')}
-                />
-                <span>Cualquier día</span>
-              </label>
+              </div>
             </div>
           )}
         </Field>
@@ -438,6 +495,7 @@ export function Seccion1Datos({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field
                     label="Relación familiar"
+                    requerido
                     error={errs?.relacion?.message}
                   >
                     <select
@@ -455,7 +513,7 @@ export function Seccion1Datos({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Teléfono" error={errs?.telefono?.message}>
+                  <Field label="Teléfono" requerido error={errs?.telefono?.message}>
                     <InputTelefono
                       name={`contactos_extra.${idx}.telefono` as const}
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -464,7 +522,7 @@ export function Seccion1Datos({
                   </Field>
                 </div>
 
-                <Field label="Email" error={errs?.email?.message}>
+                <Field label="Email" requerido error={errs?.email?.message}>
                   <input
                     type="email"
                     inputMode="email"
@@ -474,7 +532,8 @@ export function Seccion1Datos({
                 </Field>
 
                 <Field
-                  label="Mejor día para llamarle (marca uno o varios)"
+                  label="Mejor día para llamarle"
+                  requerido
                   error={errs?.dias_llamada?.message as string | undefined}
                 >
                   {fechasLlamada.length === 0 ? (
@@ -482,32 +541,39 @@ export function Seccion1Datos({
                       Aún no hay fechas configuradas para esta edición.
                     </p>
                   ) : (
-                    <div className="space-y-1.5">
-                      {fechasLlamada.map((f) => (
-                        <label
-                          key={f}
-                          className="flex items-center gap-2 cursor-pointer"
-                        >
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-500">
+                        Las llamadas se hacen entre las{' '}
+                        <strong>19:00 y las 20:00</strong>. Marca qué días le
+                        va bien.
+                      </p>
+                      <div className="space-y-1.5">
+                        {fechasLlamada.map((f) => (
+                          <label
+                            key={f}
+                            className="flex items-center gap-2 cursor-pointer text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              value={f}
+                              {...register(
+                                `contactos_extra.${idx}.dias_llamada` as const
+                              )}
+                            />
+                            <span>{formatearFecha(f)}</span>
+                          </label>
+                        ))}
+                        <label className="flex items-center gap-2 cursor-pointer border-t border-slate-200 pt-2 mt-1 text-sm">
                           <input
                             type="checkbox"
-                            value={f}
+                            value="cualquiera"
                             {...register(
                               `contactos_extra.${idx}.dias_llamada` as const
                             )}
                           />
-                          <span>{formatearFecha(f)}</span>
+                          <span>Cualquier día</span>
                         </label>
-                      ))}
-                      <label className="flex items-center gap-2 cursor-pointer border-t border-slate-200 pt-1.5 mt-1">
-                        <input
-                          type="checkbox"
-                          value="cualquiera"
-                          {...register(
-                            `contactos_extra.${idx}.dias_llamada` as const
-                          )}
-                        />
-                        <span>Cualquier día</span>
-                      </label>
+                      </div>
                     </div>
                   )}
                 </Field>
@@ -567,16 +633,19 @@ const inputCls =
 function Field({
   label,
   error,
+  requerido,
   children,
 }: {
   label: string
   error?: string
+  requerido?: boolean
   children: React.ReactNode
 }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">
         {label}
+        {requerido && <span className="text-red-600 ml-0.5">*</span>}
       </label>
       {children}
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}

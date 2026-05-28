@@ -5,6 +5,7 @@ export type TipoFirma =
   | 'vacunacion'
   | 'medicacion'
   | 'reglamento_tutor'
+  | 'reglamento_nino'
 
 type Args = {
   expedienteId: string
@@ -73,5 +74,7 @@ export function textoAutorizacion(
       return `Yo, el/la tutor/a firmante de ${alumnoNombre}, autorizo al equipo del Campus FRP, monitores y dirección, a suministrar la medicación indicada en este formulario según las dosis descritas y las aclaraciones aportadas.\n\nFecha y hora: ${fecha}`
     case 'reglamento_tutor':
       return `Yo, el/la tutor/a firmante de ${alumnoNombre}, confirmo que he leído y acepto el decálogo de convivencia y el reglamento interno del Campus FRP.\n\nFecha y hora: ${fecha}`
+    case 'reglamento_nino':
+      return `Yo, ${alumnoNombre}, conozco el decálogo de convivencia y el reglamento del Campus FRP y me comprometo a respetarlos.\n\nFecha y hora: ${fecha}`
   }
 }

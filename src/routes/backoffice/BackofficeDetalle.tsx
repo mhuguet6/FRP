@@ -59,7 +59,8 @@ const firmaLabel: Record<string, string> = {
   datos_imagen: 'Protección de datos y derechos de imagen',
   vacunacion: 'Declaración de vacunación',
   medicacion: 'Autorización de medicación',
-  reglamento_tutor: 'Conformidad con decálogo y reglamento',
+  reglamento_tutor: 'Conformidad con decálogo y reglamento (tutor/a)',
+  reglamento_nino: 'Conformidad con decálogo y reglamento (participante)',
 }
 
 export function BackofficeDetalle() {
@@ -322,6 +323,12 @@ export function BackofficeDetalle() {
             v={(s1?.relacion_familiar as string | undefined) ?? '—'}
           />
           <Row k="Teléfono" v={(s1?.telefono as string | undefined) ?? '—'} />
+          {s1?.telefono_secundario ? (
+            <Row
+              k="Teléfono secundario"
+              v={s1.telefono_secundario as string}
+            />
+          ) : null}
           <Row k="Email" v={(s1?.email as string | undefined) ?? '—'} />
           <Row k="Dirección" v={(s1?.direccion as string) ?? '—'} />
           <Row
@@ -331,12 +338,8 @@ export function BackofficeDetalle() {
               // Compat con datos viejos cuando era string único
               const legacy = s1?.dia_llamada as string | undefined
               const arr = ds.length > 0 ? ds : legacy ? [legacy] : []
-              if (arr.length === 0) return '—'
-              return arr
-                .map((d) =>
-                  d === 'cualquiera' ? 'Cualquier día' : formatearFecha(d)
-                )
-                .join(', ')
+              const txt = formatearDiasLlamada(arr)
+              return txt || '—'
             })()}
           />
           {((s1?.contactos_extra as Array<R> | undefined) ?? []).length > 0 && (
@@ -359,17 +362,8 @@ export function BackofficeDetalle() {
                       const ds = (c.dias_llamada as string[] | undefined) ?? []
                       const legacy = c.dia_llamada as string | undefined
                       const arr = ds.length > 0 ? ds : legacy ? [legacy] : []
-                      if (arr.length === 0) return ''
-                      return (
-                        ' · ' +
-                        arr
-                          .map((d) =>
-                            d === 'cualquiera'
-                              ? 'Cualquier día'
-                              : formatearFecha(d)
-                          )
-                          .join(', ')
-                      )
+                      const txt = formatearDiasLlamada(arr)
+                      return txt ? ' · ' + txt : ''
                     })()}
                   </div>
                 )
@@ -407,7 +401,14 @@ export function BackofficeDetalle() {
             v={s3?.situacion_familiar as R | undefined}
           />
           <RowAntecedentes v={s3?.antecedentes_medicos as R | undefined} />
-          <RowAlergias v={s3?.alergias as R | undefined} />
+          {/* Alergias se guarda ahora en S2 ("Salud y bienestar"). Mantenemos
+              fallback a S3 para expedientes antiguos. */}
+          <RowAlergias
+            v={
+              ((s2?.alergias as R | undefined) ??
+                (s3?.alergias as R | undefined)) as R | undefined
+            }
+          />
           <RowNoSi k="Mareos" v={s3?.mareos as R | undefined} />
           <Row
             k="Alimentación"
@@ -518,10 +519,15 @@ export function BackofficeDetalle() {
                 : 'Incompleto'
             }
           />
-          <Row
-            k="Nombre escrito por el/la participante"
-            v={(s6?.firma_nino_nombre as string | undefined) ?? '—'}
-          />
+          {/* Legacy: expedientes antiguos guardaban un nombre escrito en
+              lugar de firma. Si existe, lo mostramos. Las nuevas inscripciones
+              usan firma manuscrita visible en el bloque "Firmas" más abajo. */}
+          {s6?.firma_nino_nombre ? (
+            <Row
+              k="Nombre escrito por el/la participante (legacy)"
+              v={s6.firma_nino_nombre as string}
+            />
+          ) : null}
         </Bloque>
 
         {/* Sección 7: derechos de imagen, datos y firma del tutor */}
@@ -550,10 +556,15 @@ export function BackofficeDetalle() {
                 : 'Sí'
             }
           />
-          <Row
-            k="Nombre del/de la participante"
-            v={(s7?.participante_nombre as string | undefined) ?? '—'}
-          />
+          {/* Legacy: expedientes antiguos guardaban el nombre del participante
+              aquí. Las nuevas inscripciones ya no lo piden (se deriva del campo
+              alumno_nombre del expediente). */}
+          {s7?.participante_nombre ? (
+            <Row
+              k="Nombre del participante (legacy)"
+              v={s7.participante_nombre as string}
+            />
+          ) : null}
           <Row
             k="Nombre del familiar/tutor que firma"
             v={(s7?.tutor_nombre as string | undefined) ?? '—'}
@@ -678,6 +689,39 @@ function formatearFecha(iso: string): string {
   })
 }
 
+// Convierte un array de "dias_llamada" al formato legible para el admin.
+// Soporta valores nuevos (`<fecha>_manana`, `<fecha>_tarde`, `cualquiera`) y
+// valores legacy (`<fecha>` sin sufijo).
+function formatearDiasLlamada(arr: string[]): string {
+  if (arr.length === 0) return ''
+  if (arr.includes('cualquiera')) return 'Cualquier día'
+  // Agrupar por fecha
+  const porFecha = new Map<string, Set<string>>()
+  for (const entry of arr) {
+    if (entry === 'cualquiera') continue
+    const m = entry.match(/^(.+?)_(manana|tarde)$/)
+    if (m) {
+      const [, fecha, franja] = m
+      if (!porFecha.has(fecha)) porFecha.set(fecha, new Set())
+      porFecha.get(fecha)!.add(franja)
+    } else {
+      // Legacy: solo fecha, sin franja
+      if (!porFecha.has(entry)) porFecha.set(entry, new Set())
+    }
+  }
+  return Array.from(porFecha.entries())
+    .map(([fecha, franjas]) => {
+      const fechaFmt = formatearFecha(fecha)
+      if (franjas.size === 0) return fechaFmt
+      const tieneM = franjas.has('manana')
+      const tieneT = franjas.has('tarde')
+      if (tieneM && tieneT) return `${fechaFmt} (mañana y tarde)`
+      if (tieneM) return `${fechaFmt} (mañana)`
+      return `${fechaFmt} (tarde)`
+    })
+    .join(', ')
+}
+
 function fmtHorarioMed(m: R): string {
   const horarios = Array.isArray(m.horarios) ? (m.horarios as string[]) : []
   const partes: string[] = []
@@ -766,10 +810,28 @@ function RowNoSi({ k, v }: { k: string; v: R | undefined }) {
 function RowAlergias({ v }: { v: R | undefined }) {
   if (!v?.respuesta) return <Row k="Alergias" v={undefined} />
   if (v.respuesta === 'no') return <Row k="Alergias" v="No" />
-  const que = (v.que as string | undefined) ?? ''
-  const reaccion = (v.reaccion as string | undefined) ?? ''
+  const alimenticias = ((v.alimenticias as string | undefined) ?? '').trim()
+  const otras = ((v.otras as string | undefined) ?? '').trim()
+  const legacy = ((v.que as string | undefined) ?? '').trim()
+  const reaccion = ((v.reaccion as string | undefined) ?? '').trim()
+  // Si la familia ya rellenó las dos categorías nuevas, las mostramos
+  // separadas. Si no, caemos al campo legacy `que`.
+  if (alimenticias || otras) {
+    return (
+      <>
+        {alimenticias && (
+          <Row k="Alergias alimenticias" v={alimenticias} />
+        )}
+        {otras && <Row k="Otras alergias" v={otras} />}
+        {reaccion && <Row k="Reacción alergias" v={reaccion} />}
+      </>
+    )
+  }
   return (
-    <Row k="Alergias" v={`Sí — ${que}${reaccion ? ` (reacción: ${reaccion})` : ''}`} />
+    <Row
+      k="Alergias"
+      v={`Sí — ${legacy}${reaccion ? ` (reacción: ${reaccion})` : ''}`}
+    />
   )
 }
 

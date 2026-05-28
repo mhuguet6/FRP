@@ -107,15 +107,15 @@ Pulsar el botón limpia `pagado_at` y `pagado_por`, registra un evento `pago_rev
 1. La familia recibe el correo "Tu acceso al formulario del Campus FRP".
 2. Pulsa el enlace → llega a `/callback` → la función `reclamar_invitaciones()` enlaza su `user_id` al expediente que la clienta ya creó (sin duplicar).
 3. Si tiene un solo hijo, va directa al formulario. Con varios, ve la lista en `/mis-expedientes`.
-4. Rellena las **7 secciones** con autosave cada 1.5s + flush al desmontar:
-   1. **Datos y contacto** — datos del participante (foto obligatoria máx. 10 MB, nombre, apellidos, fecha nac, curso, dirección) + bloque de contactos a familiares: relación, teléfono con prefijo internacional, email, días de llamada preferidos (multi-checkbox), opción de añadir hasta 2 contactos extra.
-   2. **Salud y bienestar** — 12 preguntas: alergias, medicación habitual con **selector de horas** (chips 07:00–22:00 + PRN), mareos, sabe nadar, antecedentes (multi-select con opción "Otra"), síntomas (multi-select con "Otra"), movilidad/autonomía desplegable (discapacidad, movilidad, gafas/lentillas, aparatos bucales, peso), dieta, come, veces en campamentos, cuestión familiar, miedos y observaciones (opcionales).
-   3. **Autorizaciones médicas** — nombre del tutor que autoriza, autorización para administrar medicación, declaración de vacunación (al día / parcial / exento con detalle), y firma manuscrita del tutor (solo si autoriza y hay medicación en S2).
-   4. **Cuéntanos sobre ti** (el participante) — apodo, gustos por categoría con chips (música, deportes, aficiones, instrumento, comida), y 7 preguntas "sobre mí" (5 obligatorias + 2 opcionales).
-   5. **Conociéndote** (los padres, opcional) — 4 desplegables: perfil personal, salud y bienestar (físico/emocional/adicional), uso de pantallas, vuestra elección (por qué FRP, dudas, pregunta al equipo).
-   6. **Decálogo de convivencia** — decálogo + reglamento interno (faltas leves/graves/muy graves), 4 checkboxes de conformidad, **firma manuscrita del tutor** sobre el decálogo, nombre del/de la participante escrito como acto de aceptación, y observaciones generales para el equipo al final.
-   7. **Datos, imagen y envío** — desplegable con texto RGPD resumido (Fundación Rafael del Pino) + 3 **casillas de exclusión voluntaria** ("No quiero recibir info por correo electrónico", "No quiero recibir info por correo postal", "No autorizo el uso de imágenes"), nombre del participante, nombre del familiar/tutor que firma, firma manuscrita del tutor (firma `datos_imagen`), envío final.
-5. Al enviar, `estado='enviado'` y `submitted_at = now()`.
+4. Rellena las **7 secciones** con autosave cada 1.5s + flush al desmontar. Todos los desplegables (`<details>`) están **abiertos por defecto** para que ningún campo obligatorio quede oculto, y todos los obligatorios llevan asterisco rojo:
+   1. **Datos y contacto** — datos del participante (foto obligatoria máx. 10 MB con asterisco, nombre, apellidos, fecha nac, **curso escolar con nota explicativa "el del próximo septiembre, no el que está terminando"**, dirección), nombre del adulto que firma, contacto a familiares con teléfono principal + **segundo teléfono opcional** (fallback), email, días de llamada (**solo el día — el Campus llama entre 19:00 y 20:00**), opción de añadir hasta 2 contactos extra.
+   2. **Salud y bienestar** — preguntas en patrón Sí/No consistente (No = todo OK, Sí = atención): alergias con **dos categorías separadas** (alimenticias para el cocinero + otras para el médico, validación: si Sí debe haber al menos una), medicación habitual con **selector de horas** (chips 07:00–22:00 + PRN), mareos, **limitaciones o miedos con el agua/natación** (reformulado desde "sabe nadar" para mantener patrón Sí/No coherente), antecedentes (multi-select + "Otra"), síntomas (multi-select + "Otra"), desplegable de movilidad/autonomía con **discapacidad** (Sí → detalle obligatorio), **problemas de movilidad** (Sí → detalle obligatorio), gafas/lentillas, aparatos bucales y peso opcional, dieta, come, veces en campamentos, cuestión familiar, miedos y observaciones (opcionales).
+   3. **Autorizaciones médicas** — nombre del tutor que autoriza (pre-rellenado desde S1), autorización para administrar la medicación detallada en S2 (con **doble validación de coherencia** entre S2 y S3: avisos rojos inline si hay incoherencia), declaración de vacunación (al día / parcial / exento con detalle), y firma manuscrita del tutor (solo si autoriza y hay medicación en S2).
+   4. **Cuéntanos sobre ti** (el participante) — apodo, gustos por categoría con chips (música, deportes, aficiones —incluye **Ajedrez**—, instrumento, comida), y 7 preguntas "sobre mí" en desplegable abierto (5 obligatorias + 2 opcionales explícitamente marcadas).
+   5. **Conociéndote** (los padres) — 4 desplegables, **todos obligatorios excepto las 2 últimas preguntas** (cualquier otra cosa que debamos saber, pregunta al equipo): perfil personal, salud y bienestar (físico/emocional/adicional), uso de pantallas, vuestra elección (por qué FRP).
+   6. **Decálogo de convivencia** — decálogo + reglamento interno (faltas leves/graves/muy graves), 4 checkboxes de conformidad obligatorios (asterisco), **firma manuscrita del tutor** + **firma manuscrita del participante** (no escribir nombre — firma de verdad, ambas obligatorias), y observaciones generales para el equipo al final.
+   7. **Datos, imagen y envío** — desplegable con texto RGPD resumido (Fundación Rafael del Pino, C/ Rafael Calvo 39, 28010 Madrid) + 3 **casillas de exclusión voluntaria** ("No quiero recibir info por correo electrónico/postal/uso de imágenes"), nombre del familiar/tutor que firma (pre-rellenado desde S1/S3), firma manuscrita del tutor (firma `datos_imagen`). El nombre del participante **se deriva de los datos de S1**, no se pide. **Resumen arriba del todo** con: participante, tutor (email), mejor día para llamar (lista de fechas), alergias (con lista comma-separada si Sí, "No" si No), medicación (con lista de nombres comma-separada si Sí, "No" si No).
+5. Al enviar, `estado='enviado'` y `submitted_at = now()`. Pantalla de confirmación con **mensaje cálido**: *"¡Perfecto! Ya tenemos toda la información... Os esperamos en el Campus — nos lo vamos a pasar genial."*
 
 ### Fase 3b — Modificación posterior al envío (familia)
 
@@ -210,19 +210,24 @@ Paralelamente al flujo de niños, el admin puede dar de alta miembros del equipo
 
 ### 3.2 Familia (`/mis-expedientes`, `/expediente/:id`)
 
+- **Pantalla `/mis-expedientes` cálida y de bienvenida**: header con email + cerrar sesión, caja de "Bienvenidos al Campus FRP" con explicación del flujo, lista de hijos/as inscritos con badges de estado coloreados (`En progreso`, `Enviado ✓`, `Necesita corrección`, etc.) y progreso "Vais por la sección N de 7", caja azul de "Antes de empezar" con tips (foto, alergias, medicación, firmas), footer cálido. **Sin botón de "añadir expediente"** — los expedientes los crea la clienta o el admin.
 - **Sesión persistente** en localStorage. Mientras no borre cookies ni cambie de navegador, no necesita re-clicar magic link aunque cierre tab/navegador.
 - Si pierde el acceso, va a `/` → "Familia que perdió el enlace" → pide uno nuevo.
 - **Formulario de 7 secciones** con autosave 1.5s + flush al desmontar + indicador visual.
-- **Selector de prefijo telefónico internacional** (España default, 14 países más).
+- **Asterisco rojo (\*) en cada campo obligatorio** + label "(opcional)" en los opcionales — sin ambigüedad.
+- **Todos los desplegables abiertos por defecto** (`<details open>`). La familia no descubre tarde campos que no había visto.
+- **Selector de prefijo telefónico internacional** (España default, 14 países más). Teléfono principal + **segundo teléfono opcional** como fallback.
 - **Selector de horas** para medicación (07:00–22:00) + opción "según necesidad" (PRN).
 - **Subida de archivos**: foto del niño (imagen, máx. 10 MB) + certificado vacunación y receta médica (imagen o PDF, máx. 10 MB cada uno). Mensaje de error claro si supera el tamaño ("Eh, máximo 10 MB. Este archivo pesa X.X MB y es demasiado grande.").
-- **Pre-rellenos automáticos** para evitar tipear lo mismo dos veces:
-  - S1: nombre, apellidos, fecha nac, dirección (de lo que cargó la clienta) + email del tutor (del que recibió el magic link).
-  - S6: nombre del participante para el "acto de aceptación" del decálogo (de S1, editable).
-  - S7: nombre del participante para la firma de derechos de imagen y datos (de S1, editable).
+- **Pre-rellenos automáticos en cadena** para evitar tipear lo mismo dos veces:
+  - S1: nombre/apellidos del niño, fecha nac, dirección (de la clienta) + email del tutor (magic link) + nombre del tutor (de `expediente.tutor_nombre` si lo importó la clienta vía Excel).
+  - S3: `tutor_autoriza_nombre` se pre-rellena con `expediente.tutor_nombre` (que ahora viene de S1).
+  - S7: `tutor_nombre` (firma) se pre-rellena en cadena: S3 → expediente.tutor_nombre. El nombre del participante ya no se pide aquí (se deriva de `alumno_nombre + alumno_apellidos`).
+- **Coherencia entre secciones**: si la familia detalla medicación en S2 pero marca "No toma" en S3, aparece un **aviso rojo inline** justo bajo la pregunta de S3 indicando la incoherencia.
 - Validación estricta al pulsar Siguiente. Banner de error si faltan respuestas.
 - Estado `requiere_correccion` desbloquea edición para corregir y reenviar (workflow del admin).
-- **Modificación tras envío** (Fase 3b): botón "✎ Modificar formulario" en `ExpedienteEnviadoView`. Cualquier cambio bumpea `modificado_postenvio_at` y exige re-firma en Sección 7.
+- **Pantalla de confirmación final** (`ExpedienteEnviadoView`): mensaje cálido con 🎉, gradiente verde claro, *"¡Perfecto! Ya tenemos toda la información. Os esperamos en el Campus — nos lo vamos a pasar genial."* + caja con próximos pasos + opción de modificar.
+- **Modificación tras envío** (Fase 3b): botón "✎ Modificar formulario" en `ExpedienteEnviadoView`. Cualquier cambio bumpea `modificado_postenvio_at` y exige re-firma en Sección 6 y/o 7.
 
 ### 3.3 Admin — Lista (`/admin`)
 
@@ -506,7 +511,8 @@ FRP/
 │
 ├── scripts/
 │   ├── generate-test-excel.mjs      Genera test-data/familias-test.xlsx
-│   └── provision-clienta.mjs        Provisiona el user de la clienta vía Admin API
+│   ├── provision-clienta.mjs        Provisiona el user de la clienta vía Admin API
+│   └── set-otp-expiry.mjs           Configura caducidad del magic link via Management API
 │
 ├── test-data/
 │   └── familias-test.xlsx
@@ -695,41 +701,103 @@ Credenciales por defecto:
 - Email: `mhuguet@robotix.es`
 - Password: `123456` (cámbialo en producción)
 
+### Otros scripts de configuración
+
+#### `scripts/set-otp-expiry.mjs` — caducidad del magic link
+
+Cambia el tiempo de vida del magic link (token de auth por email) usando la Management API de Supabase. El dashboard tiene un cap de 86400s (24h); este script salta esa restricción.
+
+Requiere en `.env.local`:
+```env
+SUPABASE_ACCESS_TOKEN=sbp_xxx     # Generado en https://supabase.com/dashboard/account/tokens
+SUPABASE_PROJECT_REF=xxx          # Lo lees de la URL del dashboard
+```
+
+Uso:
+```bash
+node scripts/set-otp-expiry.mjs               # Aplica 604800s (7 días, default)
+node scripts/set-otp-expiry.mjs 432000        # Aplica 5 días
+node scripts/set-otp-expiry.mjs --read        # Solo lee el valor actual
+```
+
+Valor actual aplicado en producción: **7 días (604800s)**.
+
 ---
 
-## 11. Configuración de email para producción (Resend)
+## 11. Configuración de email para producción
 
-Supabase por defecto envía emails con un rate limit muy bajo (~4/hora), solo apto para testing. Para producción, conectar un proveedor SMTP externo.
+Supabase por defecto envía emails desde `noreply@mail.app.supabase.co` con rate limit muy bajo (~4/hora), apto solo para testing. Para producción hace falta un SMTP propio. Dos caminos:
 
-**Resend** (recomendado): https://resend.com — gratis hasta 3000 emails/mes.
+### 11.1 Camino actual — SMTP directo desde un buzón Workspace (Gmail o Microsoft 365)
 
-### Pasos
+Pensado para 75 familias × 2-3 emails por temporada (~225 envíos). No requiere DNS ni servicios externos.
 
-1. **Crear cuenta** en Resend (cualquier email vale, no tiene que ser del dominio que verifiques).
-2. **Verificar un dominio** (recomendado: subdominio dedicado tipo `mail.robotix.es`):
-   - En Resend → Domains → Add Domain.
-   - Añade los 3-4 registros DNS (1 TXT/SPF + 3 CNAME/DKIM, opcional 1 TXT/DMARC) en tu registrador.
-   - Espera propagación (5 min – 48 h) y pulsa Verify.
-3. **Crear API key** en Resend → API Keys → Create → "Sending access". Copia (`re_...`).
-4. **Configurar SMTP en Supabase** → Project Settings → Authentication → SMTP Settings:
-   - Enable Custom SMTP: ON
-   - Sender email: `noreply@mail.robotix.es`
-   - Sender name: `Campus FRP`
-   - Host: `smtp.resend.com`
-   - Port: `465`
-   - Username: `resend` (literal)
-   - Password: la API key
-5. **Subir rate limits** en Authentication → Rate Limits.
-6. **(Opcional)** Personalizar plantilla HTML en Authentication → Email Templates → Magic Link.
+**Setup con Gmail Workspace** (ej. `tech@robotix.es` o `xxx@frdelpino.es`):
 
-### Sesión de las familias
+1. Asegurar que el buzón tiene **2FA activado**.
+2. Generar un **App Password** en [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) — código de 16 caracteres, único para esta integración. Si la opción no aparece, pedir al admin del Workspace que habilite App Passwords para el buzón.
+3. En Supabase Dashboard → Authentication → Emails → SMTP Settings:
+   ```
+   Sender email:  xxx@robotix.es / xxx@frdelpino.es
+   Sender name:   Campus FRP
+   Host:          smtp.gmail.com
+   Port:          587
+   Username:      el email completo
+   Password:      el App Password (sin espacios)
+   ```
+4. Save.
 
-Con `persistSession: true` (default en nuestro setup), la sesión de la familia vive indefinidamente en `localStorage` mientras la familia abra la app cada cierto tiempo. En Dashboard → Authentication → Sessions:
+**Setup con Microsoft 365** (mismas instrucciones, cambian solo host y password):
+```
+Host:     smtp.office365.com
+Port:     587
+Password: la contraseña del buzón (o pedir a IT "Authenticated SMTP" si está bloqueado)
+```
 
-- **Inactivity timeout**: 90 días recomendado.
-- **JWT expiry**: 3600s (1h) default.
+**Límites prácticos**: Gmail Workspace ~2000/día por buzón, Microsoft 365 ~10000/día. Para el volumen del Campus ambos sobran x10. Supabase mostrará un aviso "designed for personal email" — es informativo, no bloqueante, irrelevante a esta escala.
 
-Una familia que rellena el día 1 puede volver a editar el día 60 sin necesidad de nuevo magic link si usa el mismo navegador. Si cambia de dispositivo o limpia datos, pide nuevo link desde `/` (botón "Familia que perdió el enlace").
+**Sent items**: los emails enviados aparecen en la carpeta "Enviados" del buzón configurado. Considerar pedir al cliente un buzón dedicado (`noreply@frdelpino.es`) para no mezclar con su correo personal.
+
+### 11.2 Camino futuro — Resend (cuando el volumen crezca)
+
+Si el Campus escala a cientos de familias o se añaden recordatorios masivos, migrar a un proveedor transaccional dedicado:
+
+- [Resend](https://resend.com) — gratis hasta 3000 emails/mes, requiere verificar dominio (4 registros DNS).
+- Sustituye el bloque SMTP de arriba por `smtp.resend.com:465` + API key.
+- Cambio de 4 campos en el dashboard, sin tocar código.
+
+### 11.3 Plantilla del email
+
+En Supabase Dashboard → Authentication → Emails → Templates → **Magic Link**:
+
+- **Subject** y **Message body** editables (HTML).
+- Variables disponibles: `{{ .ConfirmationURL }}` (el link), `{{ .Email }}`, `{{ .SiteURL }}`.
+- Cambios toman efecto inmediato, sin redeploy.
+- La plantilla actual incluye: bienvenida, llamada a urgencia, botón verde grande, **caja ámbar con requisitos de la foto del/de la participante** (clara, fondo limpio, <10MB), recordatorios sobre firmas y documentos, footer institucional.
+
+### 11.4 Caducidad del magic link
+
+Supabase por defecto: 1 hora. El cap del dashboard es 24 horas. **Para el Campus se ha subido a 7 días** vía Management API.
+
+Para aplicar/cambiar este valor, usar el script `scripts/set-otp-expiry.mjs` (ver §10). Sin él, el comando equivalente:
+
+```bash
+curl -X PATCH "https://api.supabase.com/v1/projects/<PROJECT_REF>/config/auth" \
+  -H "Authorization: Bearer <PERSONAL_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"mailer_otp_exp": 604800}'
+```
+
+604800 segundos = 7 días. Para 5 días usar 432000.
+
+### 11.5 Sesión de las familias
+
+Una vez la familia pulsa el magic link, queda con sesión en `localStorage`:
+
+- **Inactivity timeout**: 90 días recomendado en Dashboard → Authentication → Sessions.
+- **JWT expiry**: 3600s (1h) — se refresca solo, transparente al usuario.
+
+Una familia que rellena el día 1 puede volver a editar el día 60 sin nuevo magic link si usa el mismo navegador. Si cambia de dispositivo o limpia datos, pide nuevo link desde `/` ("Familia que perdió el enlace").
 
 ---
 
@@ -865,18 +933,36 @@ Objetivo: maximizar consentimiento informado sin coacción + cumplir RGPD.
 
 Históricamente, todas las firmas se recogían en la Sección 7. Tras el refactor:
 
-| Firma | Sección | Cuándo se exige |
-|---|---|---|
-| `medicacion` | **S3** (Autorizaciones médicas) | Solo si autoriza administrar medicación Y hay medicación en S2. |
-| `reglamento_tutor` | **S6** (Decálogo de convivencia) | Siempre — conformidad con decálogo + reglamento. |
-| `datos_imagen` | **S7** (Datos, imagen y envío) | Siempre — consentimiento RGPD + uso de imagen. |
+| Firma | Sección | Quién firma | Cuándo se exige |
+|---|---|---|---|
+| `medicacion` | **S3** (Autorizaciones médicas) | Tutor/a | Solo si autoriza administrar medicación Y hay medicación en S2. |
+| `reglamento_tutor` | **S6** (Decálogo de convivencia) | Tutor/a | Siempre — conformidad con decálogo + reglamento. |
+| `reglamento_nino` | **S6** (Decálogo de convivencia) | **Participante** | Siempre — el niño/a se compromete a respetar el decálogo (firma manuscrita, no escribir su nombre). |
+| `datos_imagen` | **S7** (Datos, imagen y envío) | Tutor/a | Siempre — consentimiento RGPD + uso de imagen. **Solo firma el tutor**, no el niño/a. |
 
-La firma de vacunación se eliminó (ahora es una declaración por radio en S3). El "nombre del/de la participante" pasó de ser una firma propia a un input de texto en S6 y S7 que la familia rellena (pre-rellenado con `alumno_nombre + alumno_apellidos`).
+La firma de vacunación se eliminó (ahora es una declaración por radio en S3). El "nombre del/de la participante" en S6 se sustituyó por una firma manuscrita real (`reglamento_nino`). En S7 se eliminó el campo de identificación del participante (se deriva de `alumno_nombre + alumno_apellidos`).
 
 ### Validación sección a sección
 
 - Cada sección bloquea el botón "Siguiente" si faltan obligatorios.
-- Como consecuencia, **S7 ya no muestra la lista de "faltantes"** ni gating de "Completa los datos pendientes": por diseño, llegar a S7 implica que todo lo anterior está completo. S7 solo valida sus propios campos (nombre participante, nombre tutor, firma) inline al pulsar "Enviar".
+- Como consecuencia, **S7 ya no muestra la lista de "faltantes"** ni gating de "Completa los datos pendientes": por diseño, llegar a S7 implica que todo lo anterior está completo. S7 solo valida sus propios campos (nombre tutor, firma) inline al pulsar "Enviar".
+- **Coherencia cruzada S2↔S3**: si la familia listó medicación en S2 pero marca "No toma" en S3 (o autoriza pero no listó nada en S2), aparece un aviso inline justo bajo la pregunta de S3.
+
+### Patrón de preguntas Sí/No en S2
+
+S2 ("Salud y bienestar") sigue un patrón cognitivo consistente: **No = todo bien, Sí = atención**. Por eso `sabe_nadar` se reformuló a `limitacion_agua` (*"¿Tiene alguna limitación o miedo con el agua o la natación?"*) — captura cualquier preocupación (no sabe nadar, miedo, mala experiencia, solo con flotador, etc.) y conserva el patrón de lectura. El valor antiguo `sabe_nadar` se migra automáticamente al cargar el formulario.
+
+### Alergias en dos categorías
+
+Refactorizadas a **alimenticias + otras** dentro de `seccion2.alergias`:
+- Cocinero PDF: solo lee `alimenticias`. No ve "polen, ácaros" mezclado.
+- Médico PDF: lee ambas categorías en filas separadas.
+- Backoffice detalle: dos filas si hay datos nuevos, una fila combinada si solo hay legacy (`alergias.que`).
+
+### Mensaje de bienvenida y confirmación
+
+- **Bienvenida** (`/mis-expedientes`): pantalla cálida con explicación del flujo, tips útiles (foto, alergias, firmas), badges de estado coloreados por expediente.
+- **Confirmación final** (`ExpedienteEnviadoView`): 🎉 + *"¡Perfecto! Ya tenemos toda la información. Os esperamos en el Campus — nos lo vamos a pasar genial."* + caja de próximos pasos.
 
 ### Login y sesión
 
@@ -922,6 +1008,16 @@ La firma de vacunación se eliminó (ahora es una declaración por radio en S3).
 - ✅ **Selector de horas y selector de prefijo telefónico** extraídos a componentes propios (`SelectorHorario.tsx`, `InputTelefono.tsx`).
 - ✅ **Validación sección a sección + S7 sin lista de faltantes**: cada sección bloquea Siguiente, S7 solo valida sus propios campos.
 - ✅ **Permisos staff sobre storage + tablas de firmas/documentos** (migraciones 0025 y 0026): el admin puede subir/editar firmas y archivos en cualquier expediente.
+- ✅ **Pulido UX del formulario (mayo 2026)**: asterisco rojo en todos los obligatorios, todos los desplegables abiertos por defecto, mensaje cálido en la pantalla de bienvenida y de confirmación final, sin botón de "añadir expediente" en la lista de familia.
+- ✅ **Coherencia entre secciones**: avisos inline rojos si la familia detalla medicación en S2 pero marca "No toma" en S3 (y viceversa).
+- ✅ **Pre-rellenos en cadena del nombre del tutor**: S1 (nombre del adulto que firma) → S3 (autoriza medicación) → S7 (firma RGPD). La familia lo escribe una sola vez.
+- ✅ **Patrón Sí/No coherente en S2**: `sabe_nadar` reformulado a `limitacion_agua` para mantener "No = todo bien, Sí = atención" en todas las preguntas de la sección.
+- ✅ **Alergias en dos categorías** (alimenticias + otras) para que los PDFs del cocinero y médico salgan limpios sin mezclar polen con frutos secos.
+- ✅ **Firma manuscrita del participante en S6** (`reglamento_nino`) en lugar de escribir su nombre como texto. La firma del niño en S7 (datos/imagen) se eliminó — solo firma el tutor legal.
+- ✅ **Configuración SMTP en producción**: emails vía SMTP del Workspace del cliente (no Resend), plantilla del magic link personalizada en español con bloque destacado sobre requisitos de la foto, **caducidad del magic link extendida a 7 días** vía Management API (`scripts/set-otp-expiry.mjs`).
+- ✅ **Detalle Sí/No** con campo conditional en discapacidad, problemas de movilidad y limitaciones con agua (validación: si Sí, detalle obligatorio).
+- ✅ **Resumen útil en S7**: muestra "Mejor día para llamar", alergias y medicación como listas comma-separadas (o "No" si así contestaron, en lugar del genérico "—").
+- ✅ **Bienvenida con tips para la familia**: la pantalla `/mis-expedientes` ahora explica el flujo + lista lo que necesitan tener a mano antes de empezar.
 
 ### Pendientes priorizados
 

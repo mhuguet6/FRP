@@ -60,9 +60,13 @@ const medItem = z.object({
 
 const schema = z
   .object({
-    // 1. Alergias
+    // 1. Alergias — dos categorías para que cocinero y médico filtren limpio
     alergias: z.object({
       respuesta: noSi,
+      alimenticias: z.string().optional(),
+      otras: z.string().optional(),
+      // `que` se mantiene en el schema para leer datos antiguos (pre-refactor).
+      // Nunca se escribe desde aquí; lo respeta el PDF como fallback.
       que: z.string().optional(),
     }),
     // 2. Medicación
@@ -72,8 +76,9 @@ const schema = z
     }),
     // 3. Mareos
     mareos: noSi,
-    // 4. Sabe nadar
-    sabe_nadar: noSi,
+    // 4. Limitaciones con el agua / natación
+    limitacion_agua: noSi,
+    limitacion_agua_detalle: z.string().optional(),
     // 5. Condiciones de salud relevantes — Antecedentes (multi)
     antecedentes: z.array(z.enum(ANTECEDENTES_OPTIONS)),
     antecedentes_otra: z.string().optional(),
@@ -82,7 +87,9 @@ const schema = z
     sintomas_otra: z.string().optional(),
     // 6. Movilidad y autonomía
     discapacidad: noSi,
+    discapacidad_detalle: z.string().optional(),
     problemas_movilidad: noSi,
+    problemas_movilidad_detalle: z.string().optional(),
     gafas_lentillas: noSi,
     aparatos_bucales: noSi,
     peso_kg: z
@@ -114,12 +121,16 @@ const schema = z
     observaciones: z.string().optional(),
   })
   .superRefine((v, ctx) => {
-    if (v.alergias.respuesta === 'si' && !v.alergias.que?.trim()) {
-      ctx.addIssue({
-        path: ['alergias', 'que'],
-        code: z.ZodIssueCode.custom,
-        message: 'Describe a qué tiene alergia',
-      })
+    if (v.alergias.respuesta === 'si') {
+      const tieneAlimenticias = !!v.alergias.alimenticias?.trim()
+      const tieneOtras = !!v.alergias.otras?.trim()
+      if (!tieneAlimenticias && !tieneOtras) {
+        ctx.addIssue({
+          path: ['alergias', 'alimenticias'],
+          code: z.ZodIssueCode.custom,
+          message: 'Indica al menos una alergia (alimenticia u otra)',
+        })
+      }
     }
     if (v.medicacion.respuesta === 'si') {
       if (v.medicacion.medicamentos.length === 0) {
@@ -165,6 +176,33 @@ const schema = z
         path: ['sintomas_otra'],
         code: z.ZodIssueCode.custom,
         message: 'Especifica el otro síntoma',
+      })
+    }
+    if (v.discapacidad === 'si' && !v.discapacidad_detalle?.trim()) {
+      ctx.addIssue({
+        path: ['discapacidad_detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Indica qué discapacidad',
+      })
+    }
+    if (
+      v.problemas_movilidad === 'si' &&
+      !v.problemas_movilidad_detalle?.trim()
+    ) {
+      ctx.addIssue({
+        path: ['problemas_movilidad_detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Indica qué problema de movilidad',
+      })
+    }
+    if (
+      v.limitacion_agua === 'si' &&
+      !v.limitacion_agua_detalle?.trim()
+    ) {
+      ctx.addIssue({
+        path: ['limitacion_agua_detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Describe la limitación o miedo',
       })
     }
     if (v.dieta.respuesta === 'si' && !v.dieta.detalle?.trim()) {
@@ -242,18 +280,46 @@ export function Seccion2Familia({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     defaultValues: {
-      alergias: previo.alergias ?? { respuesta: undefined as never, que: '' },
+      alergias: {
+        respuesta:
+          (previo.alergias?.respuesta as 'no' | 'si' | undefined) ??
+          (undefined as never),
+        alimenticias:
+          previo.alergias?.alimenticias ??
+          // Compat con datos antiguos: si solo existía `que`, lo cargamos como
+          // alimenticias por defecto y la familia puede mover lo que aplique.
+          (previo.alergias as { que?: string } | undefined)?.que ??
+          '',
+        otras: previo.alergias?.otras ?? '',
+        que: (previo.alergias as { que?: string } | undefined)?.que ?? '',
+      },
       medicacion: previo.medicacion ?? {
         respuesta: undefined as never,
         medicamentos: [],
       },
       mareos: previo.mareos ?? (undefined as never),
-      sabe_nadar: previo.sabe_nadar ?? (undefined as never),
+      limitacion_agua:
+        previo.limitacion_agua ??
+        // Migración: si la familia ya marcó sabe_nadar=no en el formato
+        // anterior, lo trasladamos a limitacion_agua=si (porque "no saber
+        // nadar" es ahora una limitación).
+        ((previo as { sabe_nadar?: 'si' | 'no' }).sabe_nadar === 'no'
+          ? 'si'
+          : (previo as { sabe_nadar?: 'si' | 'no' }).sabe_nadar === 'si'
+            ? 'no'
+            : (undefined as never)),
+      limitacion_agua_detalle:
+        previo.limitacion_agua_detalle ??
+        ((previo as { sabe_nadar?: 'si' | 'no' }).sabe_nadar === 'no'
+          ? 'No sabe nadar.'
+          : ''),
       antecedentes: previo.antecedentes ?? [],
       antecedentes_otra: previo.antecedentes_otra ?? '',
       sintomas: previo.sintomas ?? [],
       sintomas_otra: previo.sintomas_otra ?? '',
       discapacidad: previo.discapacidad ?? (undefined as never),
+      discapacidad_detalle: previo.discapacidad_detalle ?? '',
+      problemas_movilidad_detalle: previo.problemas_movilidad_detalle ?? '',
       problemas_movilidad:
         previo.problemas_movilidad ?? (undefined as never),
       gafas_lentillas: previo.gafas_lentillas ?? (undefined as never),
@@ -278,6 +344,8 @@ export function Seccion2Familia({
   const cuestionResp = watch('cuestion_familiar.respuesta')
   const antecedentesSel = watch('antecedentes') ?? []
   const sintomasSel = watch('sintomas') ?? []
+  const discapacidadResp = watch('discapacidad')
+  const movilidadResp = watch('problemas_movilidad')
 
   const saveStatus = useAutosave({
     data: values,
@@ -291,8 +359,15 @@ export function Seccion2Familia({
               : v.alergias?.respuesta === 'no'
                 ? false
                 : null,
+          // La columna `detalle_alergias` denormaliza ambas categorías
+          // separadas por "; " para queries / fallback rápido en el listado.
           detalle_alergias:
-            v.alergias?.respuesta === 'si' ? v.alergias?.que ?? null : null,
+            v.alergias?.respuesta === 'si'
+              ? [v.alergias?.alimenticias, v.alergias?.otras]
+                  .map((s) => s?.trim())
+                  .filter(Boolean)
+                  .join('; ') || null
+              : null,
           tiene_medicacion:
             v.medicacion?.respuesta === 'si'
               ? true
@@ -344,23 +419,50 @@ export function Seccion2Familia({
         <IndicadorGuardado status={saveStatus} />
       </div>
 
-      {/* 1. Alergias */}
+      {/* 1. Alergias — alimenticias + otras (separadas para cocinero y médico) */}
       <Bloque>
         <Pregunta requerido>¿Tiene alergias?</Pregunta>
         <RadioNoSi name="alergias.respuesta" register={register} />
-        {alergiasResp === 'si' && (
-          <Field label="¿A qué? Descríbelo con detalle" error={getError(errors, 'alergias.que')}>
-            <textarea
-              rows={2}
-              className={inputCls}
-              {...register('alergias.que')}
-            />
-          </Field>
-        )}
         {getError(errors, 'alergias.respuesta') && (
           <p className="text-red-600 text-sm">
             {getError(errors, 'alergias.respuesta')}
           </p>
+        )}
+        {alergiasResp === 'si' && (
+          <div className="space-y-3 mt-2">
+            <p className="text-xs text-slate-500">
+              Rellena las categorías que apliquen. Si una no aplica, déjala en
+              blanco. Necesitamos al menos una.
+            </p>
+            <Field
+              label="Alergias alimenticias"
+              error={getError(errors, 'alergias.alimenticias')}
+            >
+              <textarea
+                rows={2}
+                placeholder="Ej: gluten, lactosa, frutos secos, marisco…"
+                className={inputCls}
+                {...register('alergias.alimenticias')}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Esto lo verá el equipo de cocina.
+              </p>
+            </Field>
+            <Field
+              label="Otras alergias"
+              error={getError(errors, 'alergias.otras')}
+            >
+              <textarea
+                rows={2}
+                placeholder="Ambientales, medicamentos, contacto… Ej: polen, ácaros, penicilina, látex."
+                className={inputCls}
+                {...register('alergias.otras')}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Esto lo verá el equipo médico.
+              </p>
+            </Field>
+          </div>
         )}
       </Bloque>
 
@@ -490,7 +592,7 @@ export function Seccion2Familia({
           register={register}
           opciones={[
             { value: 'no', label: 'No' },
-            { value: 'si', label: 'Sí (p.ej. en coche o autobús)' },
+            { value: 'si', label: 'Sí' },
           ]}
         />
         {getError(errors, 'mareos') && (
@@ -498,26 +600,35 @@ export function Seccion2Familia({
         )}
       </Bloque>
 
-      {/* 4. Sabe nadar */}
+      {/* 4. Limitaciones o miedos con el agua */}
       <Bloque>
-        <Pregunta requerido>¿Sabe nadar?</Pregunta>
-        <RadioNoSi
-          name="sabe_nadar"
-          register={register}
-          opciones={[
-            { value: 'si', label: 'Sí' },
-            { value: 'no', label: 'No' },
-          ]}
-        />
-        {getError(errors, 'sabe_nadar') && (
+        <Pregunta requerido>
+          ¿Tiene alguna limitación o miedo con el agua o la natación?
+        </Pregunta>
+        <RadioNoSi name="limitacion_agua" register={register} />
+        {getError(errors, 'limitacion_agua') && (
           <p className="text-red-600 text-sm">
-            {getError(errors, 'sabe_nadar')}
+            {getError(errors, 'limitacion_agua')}
           </p>
+        )}
+        {watch('limitacion_agua') === 'si' && (
+          <Field
+            label="Describe la limitación o miedo"
+            requerido
+            error={getError(errors, 'limitacion_agua_detalle')}
+          >
+            <textarea
+              rows={2}
+              className={inputCls}
+              placeholder="Ej: no sabe nadar, miedo al agua, mala experiencia previa, solo nada con flotador…"
+              {...register('limitacion_agua_detalle')}
+            />
+          </Field>
         )}
       </Bloque>
 
       {/* 5. Condiciones de salud relevantes (desplegable) */}
-      <details className="rounded-xl border border-slate-200">
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Condiciones de salud relevantes
         </summary>
@@ -586,8 +697,8 @@ export function Seccion2Familia({
         </div>
       </details>
 
-      {/* 6. Movilidad y autonomía (desplegable) */}
-      <details className="rounded-xl border border-slate-200">
+      {/* 6. Movilidad y autonomía (desplegable abierto — contiene obligatorios) */}
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Movilidad y autonomía
         </summary>
@@ -597,24 +708,56 @@ export function Seccion2Familia({
             name="discapacidad"
             register={register}
             error={getError(errors, 'discapacidad')}
+            requerido
           />
+          {discapacidadResp === 'si' && (
+            <Field
+              label="Indica cuál"
+              requerido
+              error={getError(errors, 'discapacidad_detalle')}
+            >
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="Describe brevemente el tipo de discapacidad y cualquier apoyo que pueda necesitar."
+                {...register('discapacidad_detalle')}
+              />
+            </Field>
+          )}
           <BloqueNoSiSimple
             label="¿Problemas de movilidad?"
             name="problemas_movilidad"
             register={register}
             error={getError(errors, 'problemas_movilidad')}
+            requerido
           />
+          {movilidadResp === 'si' && (
+            <Field
+              label="Indica cuál"
+              requerido
+              error={getError(errors, 'problemas_movilidad_detalle')}
+            >
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="Describe brevemente el problema de movilidad y cualquier apoyo que pueda necesitar."
+                {...register('problemas_movilidad_detalle')}
+              />
+            </Field>
+          )}
           <BloqueNoSiSimple
             label="¿Lleva gafas o lentillas?"
             name="gafas_lentillas"
             register={register}
             error={getError(errors, 'gafas_lentillas')}
+            requerido
           />
           <BloqueNoSiSimple
             label="¿Lleva aparatos bucales?"
             name="aparatos_bucales"
             register={register}
             error={getError(errors, 'aparatos_bucales')}
+            requerido
           />
           <Field label="Peso aproximado (kg)" error={getError(errors, 'peso_kg')}>
             <input
@@ -781,16 +924,19 @@ function Pregunta({
 function Field({
   label,
   error,
+  requerido,
   children,
 }: {
   label: string
   error?: string
+  requerido?: boolean
   children: React.ReactNode
 }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">
         {label}
+        {requerido && <span className="text-red-600 ml-0.5">*</span>}
       </label>
       {children}
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
@@ -831,16 +977,21 @@ function BloqueNoSiSimple({
   name,
   register,
   error,
+  requerido,
 }: {
   label: string
   name: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: any
   error?: string
+  requerido?: boolean
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium text-slate-800">{label}</p>
+      <p className="text-sm font-medium text-slate-800">
+        {label}
+        {requerido && <span className="text-red-600 ml-0.5">*</span>}
+      </p>
       <RadioNoSi name={name} register={register} />
       {error && <p className="text-red-600 text-sm">{error}</p>}
     </div>

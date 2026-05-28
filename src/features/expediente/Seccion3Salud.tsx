@@ -98,7 +98,8 @@ export function Seccion3Salud({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     defaultValues: {
-      tutor_autoriza_nombre: previo.tutor_autoriza_nombre ?? '',
+      tutor_autoriza_nombre:
+        previo.tutor_autoriza_nombre || expediente.tutor_nombre || '',
       autoriza_medicacion:
         previo.autoriza_medicacion ?? (undefined as never),
       vacunacion_estado:
@@ -220,18 +221,23 @@ export function Seccion3Salud({
           <span className="text-red-600 ml-0.5">*</span>
         </p>
         <div className="flex flex-col gap-2">
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="radio"
               value="si"
+              className="mt-1"
               {...register('autoriza_medicacion')}
             />
-            <span>Sí, autorizo</span>
+            <span>
+              Sí, autorizo a tomar la medicación detallada en la pantalla
+              anterior
+            </span>
           </label>
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="radio"
               value="no_toma"
+              className="mt-1"
               {...register('autoriza_medicacion')}
             />
             <span>Mi hijo/a no toma ninguna medicación</span>
@@ -247,6 +253,14 @@ export function Seccion3Salud({
             ⚠ Has marcado que autorizas pero en la sección 2 (Salud) no hay
             medicación registrada. Vuelve a la sección 2 a añadir los
             medicamentos antes de firmar aquí.
+          </div>
+        )}
+        {autoriza === 'no_toma' && tieneMedicacionEnS2 && (
+          <div className="rounded-lg bg-red-50 border border-red-300 text-red-900 text-xs p-3 mt-2">
+            ⚠ <strong>Hay una incoherencia.</strong> En la sección 2 (Salud)
+            has detallado medicación para tu hijo/a, pero aquí marcas que no
+            toma ninguna. Revisa: o bien borra la medicación de la sección 2
+            si no la toma, o cambia esta respuesta a "Sí, autorizo".
           </div>
         )}
       </div>
@@ -312,6 +326,7 @@ export function Seccion3Salud({
         <div className="space-y-2 rounded-xl border border-slate-200 p-4">
           <div className="text-sm font-semibold text-slate-900">
             Firma del familiar/tutor
+            <span className="text-red-600 ml-0.5">*</span>
           </div>
           <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
             {textoAutorizacion('medicacion', {

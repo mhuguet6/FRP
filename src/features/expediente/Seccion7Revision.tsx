@@ -17,7 +17,6 @@ type RgpdValues = {
   excluir_email: boolean
   excluir_postal: boolean
   excluir_imagen: boolean
-  participante_nombre: string
   tutor_nombre: string
 }
 
@@ -33,7 +32,6 @@ export function Seccion7Revision({
   const previoS7 = (expediente.respuestas?.seccion7 ?? {}) as Partial<{
     comunicaciones: { no_email?: boolean; no_postal?: boolean }
     imagen: { no_autorizo?: boolean }
-    participante_nombre: string
     tutor_nombre: string
   }>
 
@@ -41,12 +39,20 @@ export function Seccion7Revision({
     expediente.alumno_apellidos ?? ''
   }`.trim()
 
+  // Encadenamos pre-rellenos: lo que la familia ya escribió en S3 sobre el
+  // nombre del tutor que autoriza, lo proponemos también aquí en S7 (es la
+  // misma persona en el 99% de los casos). Si la clienta importó el nombre
+  // desde Excel, también lo aprovechamos vía expediente.tutor_nombre.
+  const tutorEnS3 = (expediente.respuestas?.seccion3 as
+    | { tutor_autoriza_nombre?: string }
+    | undefined)?.tutor_autoriza_nombre
+
   const [rgpd, setRgpd] = useState<RgpdValues>({
     excluir_email: previoS7.comunicaciones?.no_email ?? false,
     excluir_postal: previoS7.comunicaciones?.no_postal ?? false,
     excluir_imagen: previoS7.imagen?.no_autorizo ?? false,
-    participante_nombre: previoS7.participante_nombre ?? alumnoNombreSugerido,
-    tutor_nombre: previoS7.tutor_nombre ?? '',
+    tutor_nombre:
+      previoS7.tutor_nombre || tutorEnS3 || expediente.tutor_nombre || '',
   })
 
   const esModificacion =
@@ -60,8 +66,6 @@ export function Seccion7Revision({
     setErrorEnvio(null)
     try {
       const errores: string[] = []
-      if (!rgpd.participante_nombre.trim())
-        errores.push('Falta el nombre del/de la participante')
       if (!rgpd.tutor_nombre.trim())
         errores.push('Falta el nombre del familiar/tutor')
 
@@ -84,7 +88,7 @@ export function Seccion7Revision({
 
       const ahora = new Date().toISOString()
       const texto = textoAutorizacion('datos_imagen', {
-        alumnoNombre: rgpd.participante_nombre.trim(),
+        alumnoNombre: alumnoNombreSugerido || '[participante]',
         timestamp: ahora,
       })
       await subirYRegistrarFirma({
@@ -106,7 +110,6 @@ export function Seccion7Revision({
           imagen: {
             no_autorizo: rgpd.excluir_imagen,
           },
-          participante_nombre: rgpd.participante_nombre.trim(),
           tutor_nombre: rgpd.tutor_nombre.trim(),
           ...(esModificacion
             ? { modificacion_confirmada_at: ahora }
@@ -174,27 +177,14 @@ export function Seccion7Revision({
           <Row k="Participante" v={alumnoNombreSugerido || '—'} />
           <Row k="Tutor/a (email)" v={expediente.tutor_email || '—'} />
           <Row
-            k="Alergias"
-            v={(() => {
-              const a = (r?.['seccion3'] as
-                | { alergias?: { respuesta?: string; que?: string } }
-                | undefined)?.alergias
-              if (a?.respuesta === 'si') return `Sí — ${a.que ?? ''}`
-              if (a?.respuesta === 'no') return 'No'
-              return '—'
-            })()}
+            k="Mejor día para llamar"
+            v={formatearDiasLlamadaResumen(
+              ((r?.['seccion1'] as { dias_llamada?: string[] } | undefined)
+                ?.dias_llamada as string[] | undefined) ?? []
+            )}
           />
-          <Row
-            k="Medicación durante Campus"
-            v={
-              (r?.['seccion4'] as { durante_campus?: { respuesta?: string } })
-                ?.durante_campus?.respuesta === 'si'
-                ? 'Sí'
-                : (r?.['seccion4'] as { durante_campus?: { respuesta?: string } })?.durante_campus?.respuesta === 'no'
-                  ? 'No'
-                  : '—'
-            }
-          />
+          <RowResumenAlergias r={r} />
+          <RowResumenMedicacion r={r} />
         </dl>
       </Bloque>
 
@@ -307,23 +297,6 @@ export function Seccion7Revision({
                   redes sociales ni memoria de actividades.
                 </span>
               </label>
-
-              {/* Aviso suave si excluyen imágenes */}
-              {rgpd.excluir_imagen && (
-                <div className="rounded-lg bg-amber-50 border border-amber-300 p-3 text-sm text-amber-900">
-                  <p>
-                    Recordamos que la comunicación del Campus se hace por
-                    Instagram y la web. Si no autorizáis, vuestro hijo/a no
-                    aparecerá en estas publicaciones, pero tampoco podréis
-                    ver lo que va haciendo por esos canales.
-                  </p>
-                  <p className="mt-2">
-                    Si cambiáis de opinión, podéis desmarcar la casilla. Si
-                    estáis seguros, continuad con el formulario y el equipo
-                    contactará para confirmarlo.
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </details>
@@ -332,21 +305,6 @@ export function Seccion7Revision({
       {/* Identificación + firma del tutor */}
       <Bloque>
         <Titulo>Identificación y firma</Titulo>
-
-        <Field
-          label="Nombre y apellidos del/de la participante"
-          requerido
-        >
-          <input
-            type="text"
-            value={rgpd.participante_nombre}
-            onChange={(e) =>
-              setRgpd((r) => ({ ...r, participante_nombre: e.target.value }))
-            }
-            placeholder="Nombre y apellidos del/de la participante"
-            className={inputCls}
-          />
-        </Field>
 
         <Field label="Nombre y apellidos del familiar/tutor/a" requerido>
           <input
@@ -363,11 +321,11 @@ export function Seccion7Revision({
         <div className="rounded-xl border border-slate-200 p-4 space-y-3">
           <div className="text-sm font-semibold text-slate-900">
             Firma del familiar/tutor/a
+            <span className="text-red-600 ml-0.5">*</span>
           </div>
           <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
             {textoAutorizacion('datos_imagen', {
-              alumnoNombre:
-                rgpd.participante_nombre.trim() || '[participante]',
+              alumnoNombre: alumnoNombreSugerido || '[participante]',
               timestamp: new Date().toISOString(),
             })}
           </div>
@@ -458,4 +416,93 @@ function Row({ k, v }: { k: string; v: string }) {
       <dd className="text-slate-900 text-right max-w-[60%]">{v}</dd>
     </div>
   )
+}
+
+// ---- Helpers de resumen ----------------------------------------------------
+
+function formatearFechaCorta(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })
+}
+
+// Acepta tanto el formato actual ('2026-05-05', 'cualquiera') como el legacy
+// con sufijo de franja ('2026-05-05_manana').
+function formatearDiasLlamadaResumen(arr: string[]): string {
+  if (!arr || arr.length === 0) return 'Sin especificar'
+  if (arr.includes('cualquiera')) return 'Cualquier día'
+  const fechas = new Set<string>()
+  for (const entry of arr) {
+    if (entry === 'cualquiera') continue
+    const m = entry.match(/^(.+?)_(manana|tarde)$/)
+    fechas.add(m ? m[1] : entry)
+  }
+  if (fechas.size === 0) return 'Sin especificar'
+  return Array.from(fechas).map(formatearFechaCorta).join(', ')
+}
+
+function RowResumenAlergias({
+  r,
+}: {
+  r: Record<string, unknown> | undefined
+}) {
+  const a = (r?.['seccion2'] as
+    | { alergias?: { respuesta?: string; alimenticias?: string; otras?: string; que?: string } }
+    | undefined)?.alergias
+  // Fallback a S3 legacy si no hay datos en S2
+  const aLegacy = (r?.['seccion3'] as
+    | { alergias?: { respuesta?: string; que?: string } }
+    | undefined)?.alergias
+  const resp = a?.respuesta ?? aLegacy?.respuesta
+  if (!resp) return <Row k="Alergias" v="Sin responder" />
+  if (resp === 'no') return <Row k="Alergias" v="No" />
+  // Sí — listamos alimenticias + otras separadas por coma
+  const items = [
+    a?.alimenticias,
+    a?.otras,
+    a?.que, // legacy combinado
+    aLegacy?.que,
+  ]
+    .map((s) => (s ?? '').trim())
+    .filter(Boolean)
+    .join(', ')
+  return <Row k="Alergias" v={items || 'Sí (sin detallar)'} />
+}
+
+function RowResumenMedicacion({
+  r,
+}: {
+  r: Record<string, unknown> | undefined
+}) {
+  // S2 actual: respuestas.seccion2.medicacion.{respuesta, medicamentos[]}
+  const m = (r?.['seccion2'] as
+    | {
+        medicacion?: {
+          respuesta?: string
+          medicamentos?: Array<{ nombre?: string }>
+        }
+      }
+    | undefined)?.medicacion
+  // Fallback legacy en seccion4 (durante_campus)
+  const mLegacy = (r?.['seccion4'] as
+    | {
+        durante_campus?: {
+          respuesta?: string
+          medicamentos?: Array<{ nombre?: string }>
+        }
+      }
+    | undefined)?.durante_campus
+  const resp = m?.respuesta ?? mLegacy?.respuesta
+  if (!resp) return <Row k="Medicación" v="Sin responder" />
+  if (resp === 'no') return <Row k="Medicación" v="No" />
+  const meds = m?.medicamentos ?? mLegacy?.medicamentos ?? []
+  const lista = meds
+    .map((x) => (x.nombre ?? '').trim())
+    .filter(Boolean)
+    .join(', ')
+  return <Row k="Medicación" v={lista || 'Sí (sin detallar)'} />
 }

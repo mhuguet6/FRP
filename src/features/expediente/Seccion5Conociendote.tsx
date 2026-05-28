@@ -75,10 +75,10 @@ const schema = z.object({
     error: 'Selecciona una opción',
   }),
   salud_adicional: z.string().min(1, 'Obligatorio'),
-  // Uso de pantallas (todo opcional)
-  uso_pantallas: z.string().optional(),
-  // Vuestra elección (todo opcional)
-  por_que_frp: z.string().optional(),
+  // Uso de pantallas (obligatorio)
+  uso_pantallas: z.string().min(1, 'Obligatorio'),
+  // Vuestra elección — solo la primera es obligatoria
+  por_que_frp: z.string().min(1, 'Obligatorio'),
   cualquier_otra_cosa: z.string().optional(),
   pregunta_equipo: z.string().optional(),
 })
@@ -162,7 +162,7 @@ export function Seccion5Conociendote({
           <h2 className="text-xl font-semibold text-slate-900">
             Cuéntanos sobre vuestro hijo/a
             <span className="block text-xs font-normal text-slate-500 mt-1">
-              (las familias pueden saltarse este paso · 5 mins)
+              (5 minutos)
             </span>
           </h2>
           <p className="text-slate-600 text-sm mt-2">
@@ -224,8 +224,8 @@ export function Seccion5Conociendote({
         </div>
       </details>
 
-      {/* ▸ Salud y bienestar */}
-      <details className="rounded-xl border border-slate-200">
+      {/* ▸ Salud y bienestar (abierto — contiene obligatorios) */}
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Salud y bienestar
         </summary>
@@ -284,16 +284,17 @@ export function Seccion5Conociendote({
         </div>
       </details>
 
-      {/* ▸ Uso de pantallas (todo opcional) */}
-      <details className="rounded-xl border border-slate-200">
+      {/* ▸ Uso de pantallas (abierto — contiene obligatorio) */}
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Uso de pantallas
-          <span className="ml-2 text-xs text-slate-500 font-normal">
-            (opcional)
-          </span>
         </summary>
         <div className="px-4 py-3 space-y-4 border-t border-slate-200">
-          <Field label="¿Qué opinión tenéis sobre el uso de dispositivos electrónicos?">
+          <Field
+            label="¿Qué opinión tenéis sobre el uso de dispositivos electrónicos?"
+            requerido
+            error={errors.uso_pantallas?.message}
+          >
             <textarea
               rows={3}
               className={inputCls}
@@ -303,23 +304,24 @@ export function Seccion5Conociendote({
         </div>
       </details>
 
-      {/* ▸ Vuestra elección (todo opcional) */}
-      <details className="rounded-xl border border-slate-200">
+      {/* ▸ Vuestra elección (abierto — contiene obligatorio + 2 opcionales) */}
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Vuestra elección
-          <span className="ml-2 text-xs text-slate-500 font-normal">
-            (opcional)
-          </span>
         </summary>
         <div className="px-4 py-3 space-y-4 border-t border-slate-200">
-          <Field label="¿Por qué habéis elegido el Campus FRP?">
+          <Field
+            label="¿Por qué habéis elegido el Campus FRP?"
+            requerido
+            error={errors.por_que_frp?.message}
+          >
             <textarea
               rows={3}
               className={inputCls}
               {...register('por_que_frp')}
             />
           </Field>
-          <Field label="Cualquier otra cosa que debamos saber">
+          <Field label="Cualquier otra cosa que debamos saber (opcional)">
             <textarea
               rows={3}
               placeholder="Cuéntanos cualquier aspecto que consideres oportuno para velar por el bienestar de tu hijo/a."
@@ -327,7 +329,7 @@ export function Seccion5Conociendote({
               {...register('cualquier_otra_cosa')}
             />
           </Field>
-          <Field label="¿Tenéis alguna pregunta para el equipo?">
+          <Field label="¿Tenéis alguna pregunta para el equipo? (opcional)">
             <textarea
               rows={2}
               className={inputCls}

@@ -45,6 +45,7 @@ const AFICIONES_OPTS = [
   'Teatro',
   'Manualidades',
   'Magia',
+  'Ajedrez',
 ] as const
 
 const INSTRUMENTO_OPTS = [
@@ -158,7 +159,7 @@ export function Seccion4Medicacion({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     defaultValues: {
-      nombre_apellidos: previo.nombre_apellidos ?? nombreSugerido,
+      nombre_apellidos: previo.nombre_apellidos || nombreSugerido,
       apodo: previo.apodo ?? '',
       gustos: {
         musica: previo.gustos?.musica ?? [],
@@ -296,8 +297,8 @@ export function Seccion4Medicacion({
         </div>
       </details>
 
-      {/* Sobre mí mismo/a (desplegable) */}
-      <details className="rounded-xl border border-slate-200">
+      {/* Sobre mí mismo/a (abierto — contiene obligatorios) */}
+      <details open className="rounded-xl border border-slate-200">
         <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
           Sobre mí mismo/a
         </summary>

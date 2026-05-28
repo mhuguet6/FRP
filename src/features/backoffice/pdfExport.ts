@@ -41,23 +41,34 @@ function calcularEdad(
   return String(edad)
 }
 
-function bool(b: boolean | null | undefined, jsonFallback?: string): boolean {
-  if (b === true) return true
-  if (b === false) return false
-  if (jsonFallback === 'si') return true
-  return false
+// La estructura nueva guarda alergias en `seccion2.alergias.{alimenticias,otras}`.
+// Los datos viejos quedan en `seccion3.alergias.que` o en la columna
+// denormalizada `detalle_alergias`. Estos helpers manejan ambos.
+function tieneAlergias(e: Expediente): boolean {
+  const respCol = e.tiene_alergias
+  const respS2 = get(e, 'seccion2.alergias.respuesta') as string | undefined
+  const respS3 = get(e, 'seccion3.alergias.respuesta') as string | undefined
+  return respCol === true || respS2 === 'si' || respS3 === 'si'
 }
 
-function alergiasResumen(e: Expediente): string {
-  const respCol = e.tiene_alergias
-  const respJson = get(e, 'seccion3.alergias.respuesta') as string | undefined
-  const hay = respCol === true || respJson === 'si'
-  if (!hay) return ''
+// Para el cocinero — solo alimenticias.
+function alergiasAlimenticias(e: Expediente): string {
+  if (!tieneAlergias(e)) return ''
+  const nueva = (get(e, 'seccion2.alergias.alimenticias') as string) ?? ''
+  if (nueva.trim()) return nueva.trim()
+  // Fallback a datos legacy (texto único sin categorizar).
   return (
-    (e.detalle_alergias as string | null) ??
-    (get(e, 'seccion3.alergias.que') as string) ??
+    ((get(e, 'seccion2.alergias.que') as string) ?? '').trim() ||
+    ((get(e, 'seccion3.alergias.que') as string) ?? '').trim() ||
+    ((e.detalle_alergias as string | null) ?? '').trim() ||
     ''
   )
+}
+
+// Para el médico — otras (ambientales, medicamentos, contacto).
+function alergiasOtras(e: Expediente): string {
+  if (!tieneAlergias(e)) return ''
+  return ((get(e, 'seccion2.alergias.otras') as string) ?? '').trim()
 }
 
 function alergiasReaccion(e: Expediente): string {
@@ -196,13 +207,12 @@ export async function exportarPdfCocinero(
   const { jsPDF, autoTable } = await loadPdf()
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
+  // Cocinero: solo participantes con alergia ALIMENTICIA o dieta especial.
+  // Las alergias ambientales/medicamentos no son problema en la cocina.
   const conAlergiasODieta = expedientes.filter((e) => {
-    const hayAlergias = bool(
-      e.tiene_alergias,
-      get(e, 'seccion3.alergias.respuesta') as string
-    )
+    const hayAlergiaComida = !!alergiasAlimenticias(e)
     const hayDieta = !!dietaResumen(e)
-    return hayAlergias || hayDieta
+    return hayAlergiaComida || hayDieta
   })
   const sinNada = expedientes.filter((e) => !conAlergiasODieta.includes(e))
 
@@ -215,11 +225,13 @@ export async function exportarPdfCocinero(
 
   autoTable(doc, {
     startY: 36,
-    head: [['Alumno', 'Edad', 'Alergias', 'Reacción', 'Dieta especial', 'Come']],
+    head: [
+      ['Alumno', 'Edad', 'Alergias alimenticias', 'Reacción', 'Dieta especial', 'Come'],
+    ],
     body: conAlergiasODieta.map((e) => [
       nombreCompleto(e),
       calcularEdad(e.fecha_nacimiento, edicion?.fecha_inicio),
-      alergiasResumen(e) || '—',
+      alergiasAlimenticias(e) || '—',
       alergiasReaccion(e),
       dietaResumen(e),
       comeLabel(get(e, 'seccion3.alimentacion.come') as string | undefined),
@@ -412,7 +424,8 @@ export async function exportarPdfSanitario(
     const peso = get(e, 'seccion3.alimentacion.peso_kg') as string | undefined
 
     const rows: Array<[string, string]> = [
-      ['Alergias', alergiasResumen(e)],
+      ['Alergias alimenticias', alergiasAlimenticias(e)],
+      ['Otras alergias', alergiasOtras(e)],
       ['Reacción alergias', alergiasReaccion(e)],
       ['Peso (kg)', peso || ''],
       ['Mareos', fmtNoSiDetalle(get(e, 'seccion3.mareos') as R | undefined)],

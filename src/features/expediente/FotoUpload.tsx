@@ -80,6 +80,7 @@ export function FotoUpload({ expedienteId, fotoPath, onChange }: Props) {
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">
         Foto del/de la participante
+        <span className="text-red-600 ml-0.5">*</span>
       </label>
       <div className="flex items-center gap-3">
         <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center text-slate-400 text-xs border border-slate-200">
