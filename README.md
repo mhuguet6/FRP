@@ -108,13 +108,13 @@ Pulsar el botón limpia `pagado_at` y `pagado_por`, registra un evento `pago_rev
 2. Pulsa el enlace → llega a `/callback` → la función `reclamar_invitaciones()` enlaza su `user_id` al expediente que la clienta ya creó (sin duplicar).
 3. Si tiene un solo hijo, va directa al formulario. Con varios, ve la lista en `/mis-expedientes`.
 4. Rellena las **7 secciones** con autosave cada 1.5s + flush al desmontar:
-   1. **Datos del participante** — foto obligatoria (máximo 10 MB, formato imagen), nombre, apellidos, fecha nac (edad calculada), dirección. Pre-rellenadas por la clienta; la familia puede corregir.
-   2. **Familia y contactos** — tutor que firma, DNI/NIE con regex, email editable, hasta 3 personas de contacto con **selector de prefijo internacional** (España default + 14 países).
-   3. **Salud** — 14 bloques (alergias, antecedentes, mareos, alimentación con peso numérico, patologías, COVID, discapacidad, movilidad, motricidad, gafas, miedos, carácter, atención especial, vacunación con upload de certificado opcional —imagen o PDF, hasta 10 MB—).
-   4. **Medicación** — habitual + durante Campus. Cada medicamento tiene nombre, dosis, **selector de horas** (chips toggleables 07:00–22:00) y opción "según necesidad" (PRN). Receta médica adjunta obligatoria si toma medicación en el Campus (imagen o PDF, hasta 10 MB).
-   5. **Conociéndote** — 36 preguntas para el participante y la familia, dos extras condicionales si el programa es Emprendimiento.
-   6. **Autorizaciones y normas** — comunicaciones de la Fundación, derechos de imagen (Sí/No con info pre-decisión y recordatorio suave si dice No), observaciones, agua/natación, llamada con familias, decálogo, reglamento.
-   7. **Revisión y firmas** — resumen, lista de faltantes con enlaces, hasta 4 firmas manuscritas + nombre del participante (pre-rellenado con `alumno_nombre + alumno_apellidos`, editable), envío final.
+   1. **Datos y contacto** — datos del participante (foto obligatoria máx. 10 MB, nombre, apellidos, fecha nac, curso, dirección) + bloque de contactos a familiares: relación, teléfono con prefijo internacional, email, días de llamada preferidos (multi-checkbox), opción de añadir hasta 2 contactos extra.
+   2. **Salud y bienestar** — 12 preguntas: alergias, medicación habitual con **selector de horas** (chips 07:00–22:00 + PRN), mareos, sabe nadar, antecedentes (multi-select con opción "Otra"), síntomas (multi-select con "Otra"), movilidad/autonomía desplegable (discapacidad, movilidad, gafas/lentillas, aparatos bucales, peso), dieta, come, veces en campamentos, cuestión familiar, miedos y observaciones (opcionales).
+   3. **Autorizaciones médicas** — nombre del tutor que autoriza, autorización para administrar medicación, declaración de vacunación (al día / parcial / exento con detalle), y firma manuscrita del tutor (solo si autoriza y hay medicación en S2).
+   4. **Cuéntanos sobre ti** (el participante) — apodo, gustos por categoría con chips (música, deportes, aficiones, instrumento, comida), y 7 preguntas "sobre mí" (5 obligatorias + 2 opcionales).
+   5. **Conociéndote** (los padres, opcional) — 4 desplegables: perfil personal, salud y bienestar (físico/emocional/adicional), uso de pantallas, vuestra elección (por qué FRP, dudas, pregunta al equipo).
+   6. **Decálogo de convivencia** — decálogo + reglamento interno (faltas leves/graves/muy graves), 4 checkboxes de conformidad, **firma manuscrita del tutor** sobre el decálogo, nombre del/de la participante escrito como acto de aceptación, y observaciones generales para el equipo al final.
+   7. **Datos, imagen y envío** — desplegable con texto RGPD resumido (Fundación Rafael del Pino) + 3 **casillas de exclusión voluntaria** ("No quiero recibir info por correo electrónico", "No quiero recibir info por correo postal", "No autorizo el uso de imágenes"), nombre del participante, nombre del familiar/tutor que firma, firma manuscrita del tutor (firma `datos_imagen`), envío final.
 5. Al enviar, `estado='enviado'` y `submitted_at = now()`.
 
 ### Fase 3b — Modificación posterior al envío (familia)
@@ -217,9 +217,9 @@ Paralelamente al flujo de niños, el admin puede dar de alta miembros del equipo
 - **Selector de horas** para medicación (07:00–22:00) + opción "según necesidad" (PRN).
 - **Subida de archivos**: foto del niño (imagen, máx. 10 MB) + certificado vacunación y receta médica (imagen o PDF, máx. 10 MB cada uno). Mensaje de error claro si supera el tamaño ("Eh, máximo 10 MB. Este archivo pesa X.X MB y es demasiado grande.").
 - **Pre-rellenos automáticos** para evitar tipear lo mismo dos veces:
-  - S1: nombre, apellidos, fecha nac, dirección (de lo que cargó la clienta).
-  - S2: email del tutor (del que recibió el magic link).
-  - S7: nombre del participante para la "firma del niño" (de S1, editable por si hay errata).
+  - S1: nombre, apellidos, fecha nac, dirección (de lo que cargó la clienta) + email del tutor (del que recibió el magic link).
+  - S6: nombre del participante para el "acto de aceptación" del decálogo (de S1, editable).
+  - S7: nombre del participante para la firma de derechos de imagen y datos (de S1, editable).
 - Validación estricta al pulsar Siguiente. Banner de error si faltan respuestas.
 - Estado `requiere_correccion` desbloquea edición para corregir y reenviar (workflow del admin).
 - **Modificación tras envío** (Fase 3b): botón "✎ Modificar formulario" en `ExpedienteEnviadoView`. Cualquier cambio bumpea `modificado_postenvio_at` y exige re-firma en Sección 7.
@@ -560,21 +560,23 @@ FRP/
         ├── expediente/
         │   ├── api.ts                       Tipos + funciones BD para todos los roles
         │   ├── secciones.ts                 Config de las 7 secciones
-        │   ├── validacion.ts                Faltantes + helpers
+        │   ├── validacion.ts                Faltantes + helpers (incluye requiereConfirmacionImagen)
         │   ├── firmaService.ts              Upload + textos firma
         │   ├── textosLegales.ts             Decálogo + reglamento
         │   ├── FormularioExpediente.tsx     Container con navegación (familia o admin)
-        │   ├── Seccion1Datos.tsx
-        │   ├── Seccion2Familia.tsx          Tutor + contactos con selector de prefijo
-        │   ├── Seccion3Salud.tsx
-        │   ├── Seccion4Medicacion.tsx       Selector de horas + PRN
-        │   ├── Seccion5Conociendote.tsx
-        │   ├── Seccion6Autorizaciones.tsx
-        │   ├── Seccion7Revision.tsx         Firmas + modo confirmación postenvío
+        │   ├── Seccion1Datos.tsx            Datos del participante + contactos a familiares
+        │   ├── Seccion2Familia.tsx          Salud y bienestar (12 preguntas)
+        │   ├── Seccion3Salud.tsx            Autorizaciones médicas + firma médica condicional
+        │   ├── Seccion4Medicacion.tsx       "Cuéntanos sobre ti" (del participante)
+        │   ├── Seccion5Conociendote.tsx     "Cuéntanos sobre vuestro hijo/a" (de los padres)
+        │   ├── Seccion6Autorizaciones.tsx   Decálogo de convivencia + firma reglamento + observaciones
+        │   ├── Seccion7Revision.tsx         RGPD + casillas exclusión + firma datos_imagen
         │   ├── ExpedienteEnviadoView.tsx    Con botón "Modificar formulario"
         │   ├── FileUpload.tsx
         │   ├── FotoUpload.tsx
-        │   └── SignatureCanvas.tsx
+        │   ├── SignatureCanvas.tsx
+        │   ├── SelectorHorario.tsx          Chips horas 07:00–22:00 + PRN (extraído)
+        │   └── InputTelefono.tsx            Prefijo internacional + dígitos (Controller RHF)
         │
         └── backoffice/
             ├── excelExport.ts               .xlsx con fallback a jsonb (función disponible, no en UI)
@@ -589,7 +591,7 @@ FRP/
 ### Requisitos
 
 - Node ≥ 20.18 (probado en 20.18.1).
-- Proyecto Supabase con migraciones 0001-0024 aplicadas.
+- Proyecto Supabase con migraciones 0001-0026 aplicadas.
 
 ### Setup
 
@@ -653,6 +655,8 @@ Aplicar en orden (Supabase Dashboard → SQL Editor → pegar y Run):
 | 0022 | `staff_insert_expedientes.sql` | Policy INSERT y DELETE para staff (faltaba en 0009). |
 | 0023 | `eventos_globales.sql` | `eventos.expediente_id` nullable para eventos `pdf_generado`. |
 | 0024 | `familia_edita_postenvio.sql` | RLS familia permite UPDATE en cualquier estado salvo `cerrado` + columna `modificado_postenvio_at`. |
+| 0025 | `staff_storage_write.sql` | Política INSERT/UPDATE/DELETE para staff en `storage.objects` de los buckets `firmas` y `documentos`. Necesario para que el admin pueda subir/borrar archivos al editar expedientes. |
+| 0026 | `staff_firmas_documentos_write.sql` | Política INSERT/UPDATE/DELETE para staff en las **tablas** `firmas` y `documentos` (no solo el storage). Sin esto la firma del tutor en S3/S6 fallaba con "No se ha guardado". |
 
 ---
 
@@ -844,17 +848,35 @@ Servir `dist/` desde la infraestructura de Robotix.
 - **Re-firma obligatoria** en Sección 7 tras modificación: garantía legal de que las firmas reflejan los datos actuales.
 - **Estado del expediente no cambia** durante la modificación: sigue siendo `enviado`. Solo `cerrado` bloquea.
 
-### Derechos de imagen (decisión estratégica)
+### Derechos de imagen y datos (decisión estratégica)
 
-Objetivo: maximizar consentimiento informado sin coacción.
+Objetivo: maximizar consentimiento informado sin coacción + cumplir RGPD.
 
-- **Opción "Parcial" eliminada**: solo Sí o No.
-- **Tres capas**:
-  1. **Antes de elegir**: caja azul informativa explicando las implicaciones.
-  2. **Después de elegir "No"**: caja ámbar con recordatorio suave, una sola vez.
-  3. **Después del envío**: badge ámbar en el backoffice; el equipo contacta humanamente y registra confirmación.
+- **Patrón opt-out (no opt-in)**: tres casillas de exclusión voluntaria en S7 — "No quiero recibir info por correo electrónico", "No quiero recibir info por correo postal", "No autorizo el uso de imágenes". Si dejan todas en blanco, autorizan por defecto. Más limpio que radios "Sí/No" para cada cosa.
+- **Texto RGPD resumido** dentro de un desplegable en S7 (responsable: Fundación Rafael del Pino, C/ Rafael Calvo 39, 28010 Madrid; derechos AEPD; email protecciondedatos@frdelpino.es).
+- **Tres capas** para el caso de no autorizar imágenes:
+  1. **Antes de elegir**: caja azul informativa explicando que la comunicación del Campus se hace por Instagram + web.
+  2. **Después de marcar la casilla**: caja ámbar con recordatorio suave, una sola vez.
+  3. **Después del envío**: badge ámbar en el backoffice; el equipo contacta humanamente y registra confirmación (`imagen_confirmada_at`).
+- **`requiereConfirmacionImagen`** lee ahora `seccion7.imagen.no_autorizo === true` (antes leía `seccion6.imagen.decision === 'no_autorizo'`).
 - **No hay email automático de "¿estás seguro?"**: el contacto humano es más efectivo.
-- **Cumple RGPD**: consentimiento libre, informado, específico, inequívoco.
+
+### Redistribución de firmas tras el refactor
+
+Históricamente, todas las firmas se recogían en la Sección 7. Tras el refactor:
+
+| Firma | Sección | Cuándo se exige |
+|---|---|---|
+| `medicacion` | **S3** (Autorizaciones médicas) | Solo si autoriza administrar medicación Y hay medicación en S2. |
+| `reglamento_tutor` | **S6** (Decálogo de convivencia) | Siempre — conformidad con decálogo + reglamento. |
+| `datos_imagen` | **S7** (Datos, imagen y envío) | Siempre — consentimiento RGPD + uso de imagen. |
+
+La firma de vacunación se eliminó (ahora es una declaración por radio en S3). El "nombre del/de la participante" pasó de ser una firma propia a un input de texto en S6 y S7 que la familia rellena (pre-rellenado con `alumno_nombre + alumno_apellidos`).
+
+### Validación sección a sección
+
+- Cada sección bloquea el botón "Siguiente" si faltan obligatorios.
+- Como consecuencia, **S7 ya no muestra la lista de "faltantes"** ni gating de "Completa los datos pendientes": por diseño, llegar a S7 implica que todo lo anterior está completo. S7 solo valida sus propios campos (nombre participante, nombre tutor, firma) inline al pulsar "Enviar".
 
 ### Login y sesión
 
@@ -894,6 +916,12 @@ Objetivo: maximizar consentimiento informado sin coacción.
 - ✅ Parser de Excel tolerante: ignora columnas no reconocidas, error claro si el archivo tiene imágenes/decoración.
 - ✅ Login neutro (admin + clienta usan la misma pantalla "/").
 - ✅ Clienta solo ve estudiantes en su dashboard (staff queda invisible para ella).
+- ✅ **Refactor sección por sección del formulario familia (mayo 2026)**: nueva taxonomía de 7 secciones más adecuada al contenido real (datos+contactos, salud, autorizaciones médicas, "sobre ti" del niño, "conociéndote" de los padres, decálogo, RGPD+envío).
+- ✅ **Redistribución de firmas en 3 secciones** (S3 médica, S6 reglamento, S7 datos/imagen) en lugar de centralizar todas en S7.
+- ✅ **Patrón opt-out para derechos de imagen y comunicaciones** (RGPD resumido + 3 casillas de exclusión) con texto de Fundación Rafael del Pino.
+- ✅ **Selector de horas y selector de prefijo telefónico** extraídos a componentes propios (`SelectorHorario.tsx`, `InputTelefono.tsx`).
+- ✅ **Validación sección a sección + S7 sin lista de faltantes**: cada sección bloquea Siguiente, S7 solo valida sus propios campos.
+- ✅ **Permisos staff sobre storage + tablas de firmas/documentos** (migraciones 0025 y 0026): el admin puede subir/editar firmas y archivos en cualquier expediente.
 
 ### Pendientes priorizados
 
@@ -931,11 +959,15 @@ Objetivo: maximizar consentimiento informado sin coacción.
 
 ## Estado actual del proyecto
 
-Aplicación funcional de extremo a extremo en local. Lista para:
+Aplicación funcional de extremo a extremo en local, con el formulario refactorizado sección por sección a la nueva taxonomía (mayo 2026). Lista para:
 
-- Validar el copy del formulario con el equipo.
+- Validar el copy refactorizado con el equipo del Campus.
 - Coordinar con la clienta el formato exacto del Excel de inscritos.
 - Configurar Resend en producción.
 - Deploy a la infraestructura del portal de Robotix.
 
 Las funcionalidades pendientes (PDF por expediente, aviso al equipo, recordatorios automáticos, docs adicionales) son extensiones del sistema actual y no requieren cambios estructurales.
+
+### Nota sobre datos antiguos
+
+El refactor mueve datos entre secciones: derechos de imagen y comunicaciones pasan de `seccion6` a `seccion7`, y la firma del reglamento del tutor pasa de S7 a S6. Expedientes enviados con la estructura anterior **seguirán siendo legibles** pero algunos campos aparecerán vacíos en el admin (porque ahora se leen de otra ruta jsonb). Si hay datos productivos previos al refactor, requieren script de migración; si todo es de pruebas, no hace falta hacer nada.

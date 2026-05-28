@@ -57,18 +57,21 @@ export function formatearTimestamp(iso: string): string {
 
 export function textoAutorizacion(
   tipo: TipoFirma,
-  ctx: { tutorNombre: string; alumnoNombre: string; timestamp: string }
+  ctx: { alumnoNombre: string; timestamp: string }
 ): string {
-  const { tutorNombre, alumnoNombre, timestamp } = ctx
+  const { alumnoNombre, timestamp } = ctx
   const fecha = formatearTimestamp(timestamp)
+  // El nombre del tutor ya no se solicita en el formulario; el texto legal
+  // identifica al firmante como "el/la tutor/a firmante", la identidad
+  // queda registrada vía el email autenticado de la familia + el timestamp.
   switch (tipo) {
     case 'datos_imagen':
-      return `Yo, ${tutorNombre}, como padre/madre/tutor/a de ${alumnoNombre}, doy mi conformidad al tratamiento de datos personales según se indica en este formulario y a las preferencias de uso de imagen y comunicaciones seleccionadas.\n\nFecha y hora: ${fecha}`
+      return `Yo, el/la tutor/a firmante de ${alumnoNombre}, doy mi conformidad al tratamiento de datos personales según se indica en este formulario y a las preferencias de uso de imagen y comunicaciones seleccionadas.\n\nFecha y hora: ${fecha}`
     case 'vacunacion':
-      return `Yo, ${tutorNombre}, como padre/madre/tutor/a de ${alumnoNombre}, certifico que el/la participante está protegido/a con las vacunas que establece la normativa vigente.\n\nFecha y hora: ${fecha}`
+      return `Yo, el/la tutor/a firmante de ${alumnoNombre}, certifico que el/la participante está protegido/a con las vacunas que establece la normativa vigente.\n\nFecha y hora: ${fecha}`
     case 'medicacion':
-      return `Yo, ${tutorNombre}, como padre/madre/tutor/a de ${alumnoNombre}, autorizo al equipo del Campus FRP, monitores y dirección, a suministrar la medicación indicada en este formulario según las dosis descritas y las aclaraciones aportadas.\n\nFecha y hora: ${fecha}`
+      return `Yo, el/la tutor/a firmante de ${alumnoNombre}, autorizo al equipo del Campus FRP, monitores y dirección, a suministrar la medicación indicada en este formulario según las dosis descritas y las aclaraciones aportadas.\n\nFecha y hora: ${fecha}`
     case 'reglamento_tutor':
-      return `Yo, ${tutorNombre}, como padre/madre/tutor/a de ${alumnoNombre}, confirmo que he leído y acepto el decálogo de convivencia y el reglamento interno del Campus FRP.\n\nFecha y hora: ${fecha}`
+      return `Yo, el/la tutor/a firmante de ${alumnoNombre}, confirmo que he leído y acepto el decálogo de convivencia y el reglamento interno del Campus FRP.\n\nFecha y hora: ${fecha}`
   }
 }

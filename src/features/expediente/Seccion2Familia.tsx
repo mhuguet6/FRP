@@ -1,104 +1,221 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import type { CampusEdicion, Expediente } from './api'
 import { useAutosave } from '../../lib/useAutosave'
 import { IndicadorGuardado } from '../../components/ui/IndicadorGuardado'
-import { ErrorBanner, MSG_FALTAN_RESPUESTAS } from '../../components/ui/ErrorBanner'
+import {
+  ErrorBanner,
+  MSG_FALTAN_RESPUESTAS,
+} from '../../components/ui/ErrorBanner'
+import { SelectorHorario } from './SelectorHorario'
 
-const RELACIONES = [
-  'Padre',
-  'Madre',
-  'Tutor/a legal',
-  'Abuelo/a',
-  'Tío/a',
-  'Hermano/a',
-  'Otro',
+// ----------------------------------------------------------------------------
+// Constantes
+// ----------------------------------------------------------------------------
+
+const ANTECEDENTES_OPTIONS = [
+  'Enfermedades respiratorias',
+  'Trastornos digestivos',
+  'Enfermedades cutáneas',
+  'Accidentes o lesiones relevantes',
+  'Intervenciones quirúrgicas',
+  'Otra',
 ] as const
 
-// DNI español (8 dígitos + letra) o NIE (X/Y/Z + 7 dígitos + letra)
-const DNI_REGEX = /^([XYZ]\d{7}|\d{8})[A-Za-z]$/
+const SINTOMAS_OPTIONS = [
+  'Anginas',
+  'Faringitis',
+  'Dolor de oídos',
+  'Sinusitis',
+  'Enuresis nocturna',
+  'Insomnio',
+  'Resfriados frecuentes',
+  'Estreñimiento',
+  'Empachos',
+  'Reumatismo infantil',
+  'Dolor dental',
+  'Otra',
+] as const
 
-// Teléfono: aceptamos
-//  - Forma internacional nueva +CCdígitos (la que escribe la UI nueva)
-//  - Forma legacy de solo dígitos (datos antiguos pre-prefijo)
-const TELEFONO_REGEX = /^(\+\d{8,18}|\d{9,15})$/
+const COME_OPTIONS = ['mucho', 'normal', 'poco'] as const
+const CAMPAMENTOS_OPTIONS = ['ninguna', '1', '2-3', 'mas-de-3'] as const
 
-// Lista de prefijos disponibles en el selector
-const PREFIJOS: Array<{ code: string; label: string }> = [
-  { code: '+34', label: 'España' },
-  { code: '+33', label: 'Francia' },
-  { code: '+351', label: 'Portugal' },
-  { code: '+39', label: 'Italia' },
-  { code: '+49', label: 'Alemania' },
-  { code: '+44', label: 'Reino Unido' },
-  { code: '+41', label: 'Suiza' },
-  { code: '+32', label: 'Bélgica' },
-  { code: '+31', label: 'Países Bajos' },
-  { code: '+212', label: 'Marruecos' },
-  { code: '+1', label: 'EE.UU. / Canadá' },
-  { code: '+52', label: 'México' },
-  { code: '+54', label: 'Argentina' },
-  { code: '+57', label: 'Colombia' },
-  { code: '+55', label: 'Brasil' },
-]
+// ----------------------------------------------------------------------------
+// Schema
+// ----------------------------------------------------------------------------
 
-const contactoSchema = z.object({
-  telefono: z
-    .string()
-    .min(1, 'Obligatorio')
-    .regex(TELEFONO_REGEX, 'Solo números (9 dígitos)'),
-  nombre: z.string().min(1, 'Obligatorio'),
-  relacion: z.enum(RELACIONES, { message: 'Selecciona una relación' }),
+const noSi = z.union([z.literal('no'), z.literal('si')], {
+  error: 'Selecciona una opción',
 })
 
-const contactoOpcionalSchema = z
+const medItem = z.object({
+  nombre: z.string().optional(),
+  dosis: z.string().optional(),
+  horarios: z.array(z.string()).optional(),
+  prn: z.boolean().optional(),
+  instrucciones: z.string().optional(),
+})
+
+const schema = z
   .object({
-    telefono: z.string().optional().or(z.literal('')),
-    nombre: z.string().optional().or(z.literal('')),
-    relacion: z.enum(RELACIONES).optional(),
-  })
-  .refine(
-    (v) => {
-      const algo = !!(v.telefono || v.nombre || v.relacion)
-      if (!algo) return true
-      return !!(v.telefono && v.nombre && v.relacion)
-    },
-    { message: 'Si añades un contacto, completa los tres campos' }
-  )
-  .refine(
-    (v) => !v.telefono || TELEFONO_REGEX.test(v.telefono),
-    { message: 'Solo números (9 dígitos)', path: ['telefono'] }
-  )
-
-const schema = z.object({
-  tutor_nombre: z.string().min(1, 'Obligatorio'),
-  tutor_dni: z
-    .string()
-    .min(1, 'Obligatorio')
-    .regex(DNI_REGEX, 'Formato no válido. Ejemplo: 12345678A'),
-  email_contacto: z
-    .string()
-    .min(1, 'Obligatorio')
-    .email('Email no válido'),
-  contactos: z
-    .tuple([contactoSchema])
-    .rest(contactoOpcionalSchema)
-    .refine((arr) => arr.length >= 1 && arr.length <= 3, {
-      message: 'Entre 1 y 3 contactos',
+    // 1. Alergias
+    alergias: z.object({
+      respuesta: noSi,
+      que: z.string().optional(),
     }),
-})
+    // 2. Medicación
+    medicacion: z.object({
+      respuesta: noSi,
+      medicamentos: z.array(medItem),
+    }),
+    // 3. Mareos
+    mareos: noSi,
+    // 4. Sabe nadar
+    sabe_nadar: noSi,
+    // 5. Condiciones de salud relevantes — Antecedentes (multi)
+    antecedentes: z.array(z.enum(ANTECEDENTES_OPTIONS)),
+    antecedentes_otra: z.string().optional(),
+    // 5b. Condiciones de salud relevantes — Síntomas habituales (multi)
+    sintomas: z.array(z.enum(SINTOMAS_OPTIONS)),
+    sintomas_otra: z.string().optional(),
+    // 6. Movilidad y autonomía
+    discapacidad: noSi,
+    problemas_movilidad: noSi,
+    gafas_lentillas: noSi,
+    aparatos_bucales: noSi,
+    peso_kg: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || /^\d+([.,]\d+)?$/.test(v.trim()),
+        'Solo números (puedes usar coma o punto decimal)'
+      ),
+    // 7. Dieta especial
+    dieta: z.object({
+      respuesta: noSi,
+      detalle: z.string().optional(),
+    }),
+    // 8. Come
+    come: z.enum(COME_OPTIONS, { error: 'Selecciona una opción' }),
+    // 9. Veces en campamentos
+    veces_campamentos: z.enum(CAMPAMENTOS_OPTIONS, {
+      error: 'Selecciona una opción',
+    }),
+    // 10. Cuestión familiar relevante
+    cuestion_familiar: z.object({
+      respuesta: noSi,
+      detalle: z.string().optional(),
+    }),
+    // 11. Miedos (opcional — texto libre, sin validación)
+    miedos: z.string().optional(),
+    // 12. Observaciones generales (opcional — texto libre, sin validación)
+    observaciones: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.alergias.respuesta === 'si' && !v.alergias.que?.trim()) {
+      ctx.addIssue({
+        path: ['alergias', 'que'],
+        code: z.ZodIssueCode.custom,
+        message: 'Describe a qué tiene alergia',
+      })
+    }
+    if (v.medicacion.respuesta === 'si') {
+      if (v.medicacion.medicamentos.length === 0) {
+        ctx.addIssue({
+          path: ['medicacion', 'medicamentos'],
+          code: z.ZodIssueCode.custom,
+          message: 'Añade al menos un medicamento',
+        })
+      }
+      v.medicacion.medicamentos.forEach((m, i) => {
+        if (!m.nombre?.trim() || !m.dosis?.trim()) {
+          ctx.addIssue({
+            path: ['medicacion', 'medicamentos', i, 'nombre'],
+            code: z.ZodIssueCode.custom,
+            message: 'Completa nombre y dosis',
+          })
+        }
+        const tieneHoras = (m.horarios ?? []).length > 0
+        if (!tieneHoras && !m.prn) {
+          ctx.addIssue({
+            path: ['medicacion', 'medicamentos', i, 'horarios'],
+            code: z.ZodIssueCode.custom,
+            message: 'Marca al menos una hora o "según necesidad"',
+          })
+        }
+      })
+    }
+    if (
+      v.antecedentes.includes('Otra') &&
+      !v.antecedentes_otra?.trim()
+    ) {
+      ctx.addIssue({
+        path: ['antecedentes_otra'],
+        code: z.ZodIssueCode.custom,
+        message: 'Especifica la otra condición',
+      })
+    }
+    if (
+      v.sintomas.includes('Otra') &&
+      !v.sintomas_otra?.trim()
+    ) {
+      ctx.addIssue({
+        path: ['sintomas_otra'],
+        code: z.ZodIssueCode.custom,
+        message: 'Especifica el otro síntoma',
+      })
+    }
+    if (v.dieta.respuesta === 'si' && !v.dieta.detalle?.trim()) {
+      ctx.addIssue({
+        path: ['dieta', 'detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Describe la dieta',
+      })
+    }
+    if (
+      v.cuestion_familiar.respuesta === 'si' &&
+      !v.cuestion_familiar.detalle?.trim()
+    ) {
+      ctx.addIssue({
+        path: ['cuestion_familiar', 'detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Describe la cuestión',
+      })
+    }
+  })
 
-export type Seccion2Values = z.infer<typeof schema>
+export type Seccion2Values = z.input<typeof schema>
+
+// ----------------------------------------------------------------------------
+// Etiquetas
+// ----------------------------------------------------------------------------
+
+const COME_LABEL: Record<(typeof COME_OPTIONS)[number], string> = {
+  mucho: 'Mucho',
+  normal: 'Normal',
+  poco: 'Poco',
+}
+
+const CAMPAMENTOS_LABEL: Record<(typeof CAMPAMENTOS_OPTIONS)[number], string> = {
+  ninguna: 'Ninguna — es la primera vez',
+  '1': '1 vez',
+  '2-3': '2-3 veces',
+  'mas-de-3': 'Más de 3 veces',
+}
+
+// ----------------------------------------------------------------------------
+// Componente
+// ----------------------------------------------------------------------------
 
 type Props = {
   expediente: Expediente
   edicion: CampusEdicion | null
-  authEmail: string | null
+  authEmail?: string | null
   onSave: (patch: {
     columnas: Partial<Expediente>
-    respuestas: Partial<Seccion2Values>
+    respuestas: Record<string, unknown>
   }) => Promise<void>
   onPrev: () => void
   onNext: () => Promise<void>
@@ -106,20 +223,13 @@ type Props = {
 
 export function Seccion2Familia({
   expediente,
-  authEmail,
   onSave,
   onPrev,
   onNext,
 }: Props) {
-  const previo = (expediente.respuestas?.seccion2 as
-    | Partial<Seccion2Values>
-    | undefined) ?? {}
-
-  const contactosPrevios = previo.contactos ?? []
-  const defaultContactos = [
-    contactosPrevios[0] ?? { telefono: '', nombre: '', relacion: undefined as never },
-    ...contactosPrevios.slice(1),
-  ]
+  const previo =
+    (expediente.respuestas?.seccion2 as Partial<Seccion2Values> | undefined) ??
+    {}
 
   const {
     register,
@@ -132,39 +242,83 @@ export function Seccion2Familia({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     defaultValues: {
-      tutor_nombre: expediente.tutor_nombre ?? previo.tutor_nombre ?? '',
-      tutor_dni: expediente.tutor_dni ?? previo.tutor_dni ?? '',
-      email_contacto:
-        expediente.tutor_email ?? previo.email_contacto ?? authEmail ?? '',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      contactos: defaultContactos as any,
+      alergias: previo.alergias ?? { respuesta: undefined as never, que: '' },
+      medicacion: previo.medicacion ?? {
+        respuesta: undefined as never,
+        medicamentos: [],
+      },
+      mareos: previo.mareos ?? (undefined as never),
+      sabe_nadar: previo.sabe_nadar ?? (undefined as never),
+      antecedentes: previo.antecedentes ?? [],
+      antecedentes_otra: previo.antecedentes_otra ?? '',
+      sintomas: previo.sintomas ?? [],
+      sintomas_otra: previo.sintomas_otra ?? '',
+      discapacidad: previo.discapacidad ?? (undefined as never),
+      problemas_movilidad:
+        previo.problemas_movilidad ?? (undefined as never),
+      gafas_lentillas: previo.gafas_lentillas ?? (undefined as never),
+      aparatos_bucales: previo.aparatos_bucales ?? (undefined as never),
+      peso_kg: previo.peso_kg ?? '',
+      dieta: previo.dieta ?? { respuesta: undefined as never, detalle: '' },
+      come: previo.come ?? (undefined as never),
+      veces_campamentos: previo.veces_campamentos ?? (undefined as never),
+      cuestion_familiar:
+        previo.cuestion_familiar ?? { respuesta: undefined as never, detalle: '' },
+      miedos: previo.miedos ?? '',
+      observaciones: previo.observaciones ?? '',
     },
   })
 
-  const { fields, append, remove } = useFieldArray({
-    control,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    name: 'contactos' as any,
-  })
+  const medArray = useFieldArray({ control, name: 'medicacion.medicamentos' })
 
   const values = watch()
+  const alergiasResp = watch('alergias.respuesta')
+  const medicacionResp = watch('medicacion.respuesta')
+  const dietaResp = watch('dieta.respuesta')
+  const cuestionResp = watch('cuestion_familiar.respuesta')
+  const antecedentesSel = watch('antecedentes') ?? []
+  const sintomasSel = watch('sintomas') ?? []
 
   const saveStatus = useAutosave({
     data: values,
     enabled: true,
     save: async (v) => {
-      const tel1 = v.contactos?.[0]?.telefono ?? null
       await onSave({
         columnas: {
-          tutor_nombre: v.tutor_nombre || null,
-          tutor_dni: v.tutor_dni || null,
-          tutor_email: v.email_contacto || null,
-          tutor_telefono: tel1,
+          tiene_alergias:
+            v.alergias?.respuesta === 'si'
+              ? true
+              : v.alergias?.respuesta === 'no'
+                ? false
+                : null,
+          detalle_alergias:
+            v.alergias?.respuesta === 'si' ? v.alergias?.que ?? null : null,
+          tiene_medicacion:
+            v.medicacion?.respuesta === 'si'
+              ? true
+              : v.medicacion?.respuesta === 'no'
+                ? false
+                : null,
         },
-        respuestas: v,
+        respuestas: v as Record<string, unknown>,
       })
     },
   })
+
+  // Auto-añadir UN medicamento vacío al marcar Sí (en useEffect para evitar
+  // doble append en StrictMode/re-renders).
+  useEffect(() => {
+    if (medicacionResp === 'si' && medArray.fields.length === 0) {
+      medArray.append({
+        nombre: '',
+        dosis: '',
+        horarios: [],
+        prn: false,
+        instrucciones: '',
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [medicacionResp])
 
   const [submitError, setSubmitError] = useState<string | null>(null)
   const onValid = async () => {
@@ -173,173 +327,408 @@ export function Seccion2Familia({
   }
   const onInvalid = () => setSubmitError(MSG_FALTAN_RESPUESTAS)
 
-  const puedeAnadir = fields.length < 3
-  const onAnadir = () =>
-    append({ telefono: '', nombre: '', relacion: undefined as never })
-
   return (
     <form
       onSubmit={handleSubmit(onValid, onInvalid)}
-      className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6"
+      className="bg-white rounded-2xl border border-slate-200 p-6 space-y-8"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">
-            Familia y contactos
+            Salud y bienestar
           </h2>
           <p className="text-slate-600 text-sm mt-1">
-            Datos del padre, madre o tutor/a que firma la inscripción y
-            personas de contacto en orden de prioridad.
+            Información médica relevante para el equipo del Campus.
           </p>
         </div>
         <IndicadorGuardado status={saveStatus} />
       </div>
 
-      <div className="space-y-4">
-        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">
-          Tutor/a que firma
-        </h3>
-
-        <Field label="Nombre y apellidos" error={errors.tutor_nombre?.message}>
-          <input
-            type="text"
-            autoComplete="name"
-            className={inputCls}
-            {...register('tutor_nombre')}
-          />
-        </Field>
-
-        <Field
-          label="DNI"
-          error={errors.tutor_dni?.message}
-        >
-          <input
-            type="text"
-            inputMode="text"
-            placeholder="12345678A"
-            maxLength={9}
-            className={inputCls + ' uppercase'}
-            {...register('tutor_dni', {
-              setValueAs: (v: string) =>
-                (v ?? '').replace(/\s+/g, '').toUpperCase(),
-            })}
-          />
-        </Field>
-
-        <Field
-          label="Email de contacto familiar"
-          error={errors.email_contacto?.message}
-        >
-          <input
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            className={inputCls}
-            {...register('email_contacto')}
-          />
-          <p className="text-xs text-slate-500 mt-1">
-            Lo hemos rellenado con el email con el que entraste. Puedes
-            cambiarlo si prefieres recibir las comunicaciones en otro.
+      {/* 1. Alergias */}
+      <Bloque>
+        <Pregunta requerido>¿Tiene alergias?</Pregunta>
+        <RadioNoSi name="alergias.respuesta" register={register} />
+        {alergiasResp === 'si' && (
+          <Field label="¿A qué? Descríbelo con detalle" error={getError(errors, 'alergias.que')}>
+            <textarea
+              rows={2}
+              className={inputCls}
+              {...register('alergias.que')}
+            />
+          </Field>
+        )}
+        {getError(errors, 'alergias.respuesta') && (
+          <p className="text-red-600 text-sm">
+            {getError(errors, 'alergias.respuesta')}
           </p>
-        </Field>
-      </div>
+        )}
+      </Bloque>
 
-      <div className="space-y-4 border-t border-slate-200 pt-6">
-        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">
-          Personas de contacto
-        </h3>
-        <p className="text-slate-600 text-sm -mt-2">
-          Indica en orden de prioridad a quién podemos llamar.
-        </p>
-
-        {fields.map((field, idx) => {
-          const contactoErrors =
-            errors.contactos?.[idx] as
-              | {
-                  telefono?: { message?: string }
-                  nombre?: { message?: string }
-                  relacion?: { message?: string }
-                  message?: string
-                }
-              | undefined
-          return (
-            <div
-              key={field.id}
-              className="rounded-xl border border-slate-200 p-4 space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-slate-700">
-                  Contacto {idx + 1}
-                  {idx === 0 && (
-                    <span className="text-xs text-slate-500 font-normal ml-1">
-                      (obligatorio)
-                    </span>
-                  )}
-                </div>
-                {idx > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => remove(idx)}
-                    className="text-xs text-red-600 hover:underline"
+      {/* 2. Medicación */}
+      <Bloque>
+        <Pregunta requerido>¿Toma alguna medicación?</Pregunta>
+        <RadioNoSi
+          name="medicacion.respuesta"
+          register={register}
+          opciones={[
+            { value: 'no', label: 'No toma ninguna medicación' },
+            { value: 'si', label: 'Sí' },
+          ]}
+        />
+        {medicacionResp === 'si' && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Indica la medicación periódica que deba tomar y/o aquella puntual
+              que pueda necesitar en el caso de que el equipo del Campus
+              consulte a la familia por alguna dolencia habitual del/la
+              participante.
+            </p>
+            {medArray.fields.map((field, idx) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const itemErr = (errors.medicacion as any)?.medicamentos?.[idx]
+              return (
+                <div
+                  key={field.id}
+                  className="rounded-xl border border-slate-200 p-4 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-slate-700">
+                      Medicamento {idx + 1}
+                    </div>
+                    {medArray.fields.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => medArray.remove(idx)}
+                        className="text-xs text-red-600 hover:underline"
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                  <Field label="Medicación" error={itemErr?.nombre?.message}>
+                    <input
+                      type="text"
+                      className={inputCls}
+                      {...register(`medicacion.medicamentos.${idx}.nombre`)}
+                    />
+                  </Field>
+                  <Field label="Dosis">
+                    <input
+                      type="text"
+                      placeholder="p. ej. 1 comprimido"
+                      className={inputCls}
+                      {...register(`medicacion.medicamentos.${idx}.dosis`)}
+                    />
+                  </Field>
+                  <Field
+                    label="Horario de administración"
+                    error={itemErr?.horarios?.message}
                   >
-                    Quitar
-                  </button>
-                )}
-              </div>
+                    <SelectorHorario
+                      horarios={
+                        (watch(
+                          `medicacion.medicamentos.${idx}.horarios`
+                        ) as string[] | undefined) ?? []
+                      }
+                      prn={
+                        (watch(
+                          `medicacion.medicamentos.${idx}.prn`
+                        ) as boolean | undefined) ?? false
+                      }
+                      onChangeHorarios={(h) =>
+                        setValue(
+                          `medicacion.medicamentos.${idx}.horarios`,
+                          h,
+                          { shouldDirty: true, shouldValidate: true }
+                        )
+                      }
+                      onChangePrn={(v) =>
+                        setValue(
+                          `medicacion.medicamentos.${idx}.prn`,
+                          v,
+                          { shouldDirty: true, shouldValidate: true }
+                        )
+                      }
+                    />
+                  </Field>
+                  <Field label="Instrucciones para los monitores (opcional)">
+                    <textarea
+                      rows={2}
+                      className={inputCls}
+                      {...register(
+                        `medicacion.medicamentos.${idx}.instrucciones`
+                      )}
+                    />
+                  </Field>
+                </div>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() =>
+                medArray.append({
+                  nombre: '',
+                  dosis: '',
+                  horarios: [],
+                  prn: false,
+                  instrucciones: '',
+                })
+              }
+              className="w-full rounded-lg border border-dashed border-slate-300 text-slate-600 font-medium py-2.5 hover:bg-slate-50"
+            >
+              + Añadir otro medicamento
+            </button>
+          </div>
+        )}
+      </Bloque>
 
-              <Field label="Teléfono" error={contactoErrors?.telefono?.message}>
-                <InputTelefono
-                  name={`contactos.${idx}.telefono` as const}
-                  watch={watch}
-                  setValue={setValue}
-                />
-              </Field>
+      {/* 3. Mareos */}
+      <Bloque>
+        <Pregunta requerido>¿Se marea con facilidad?</Pregunta>
+        <RadioNoSi
+          name="mareos"
+          register={register}
+          opciones={[
+            { value: 'no', label: 'No' },
+            { value: 'si', label: 'Sí (p.ej. en coche o autobús)' },
+          ]}
+        />
+        {getError(errors, 'mareos') && (
+          <p className="text-red-600 text-sm">{getError(errors, 'mareos')}</p>
+        )}
+      </Bloque>
 
-              <Field label="Nombre" error={contactoErrors?.nombre?.message}>
+      {/* 4. Sabe nadar */}
+      <Bloque>
+        <Pregunta requerido>¿Sabe nadar?</Pregunta>
+        <RadioNoSi
+          name="sabe_nadar"
+          register={register}
+          opciones={[
+            { value: 'si', label: 'Sí' },
+            { value: 'no', label: 'No' },
+          ]}
+        />
+        {getError(errors, 'sabe_nadar') && (
+          <p className="text-red-600 text-sm">
+            {getError(errors, 'sabe_nadar')}
+          </p>
+        )}
+      </Bloque>
+
+      {/* 5. Condiciones de salud relevantes (desplegable) */}
+      <details className="rounded-xl border border-slate-200">
+        <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
+          Condiciones de salud relevantes
+        </summary>
+        <div className="px-4 py-3 space-y-5 border-t border-slate-200">
+          <div>
+            <Pregunta>Antecedentes (puedes marcar varios)</Pregunta>
+            <div className="grid sm:grid-cols-2 gap-2 mt-2">
+              {ANTECEDENTES_OPTIONS.map((opt) => (
+                <label
+                  key={opt}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    value={opt}
+                    {...register('antecedentes')}
+                  />
+                  <span>{opt}</span>
+                </label>
+              ))}
+            </div>
+            {antecedentesSel.includes('Otra') && (
+              <Field
+                label="Especifica la otra condición"
+                error={getError(errors, 'antecedentes_otra')}
+              >
                 <input
                   type="text"
                   className={inputCls}
-                  {...register(`contactos.${idx}.nombre` as const)}
+                  {...register('antecedentes_otra')}
                 />
               </Field>
+            )}
+          </div>
 
-              <Field
-                label="Relación con el/la participante"
-                error={contactoErrors?.relacion?.message}
-              >
-                <select
-                  className={inputCls}
-                  defaultValue=""
-                  {...register(`contactos.${idx}.relacion` as const)}
+          <div>
+            <Pregunta>Síntomas habituales (puedes marcar varios)</Pregunta>
+            <div className="grid sm:grid-cols-2 gap-2 mt-2">
+              {SINTOMAS_OPTIONS.map((opt) => (
+                <label
+                  key={opt}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
                 >
-                  <option value="" disabled>
-                    Selecciona…
-                  </option>
-                  {RELACIONES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              {contactoErrors?.message && (
-                <p className="text-red-600 text-sm">{contactoErrors.message}</p>
-              )}
+                  <input
+                    type="checkbox"
+                    value={opt}
+                    {...register('sintomas')}
+                  />
+                  <span>{opt}</span>
+                </label>
+              ))}
             </div>
-          )
-        })}
+            {sintomasSel.includes('Otra') && (
+              <Field
+                label="Especifica el otro síntoma"
+                error={getError(errors, 'sintomas_otra')}
+              >
+                <input
+                  type="text"
+                  className={inputCls}
+                  {...register('sintomas_otra')}
+                />
+              </Field>
+            )}
+          </div>
+        </div>
+      </details>
 
-        {puedeAnadir && (
-          <button
-            type="button"
-            onClick={onAnadir}
-            className="w-full rounded-lg border border-dashed border-slate-300 text-slate-600 font-medium py-2.5 hover:bg-slate-50"
-          >
-            + Añadir otro teléfono
-          </button>
+      {/* 6. Movilidad y autonomía (desplegable) */}
+      <details className="rounded-xl border border-slate-200">
+        <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 text-sm">
+          Movilidad y autonomía
+        </summary>
+        <div className="px-4 py-3 space-y-5 border-t border-slate-200">
+          <BloqueNoSiSimple
+            label="¿Tiene alguna discapacidad?"
+            name="discapacidad"
+            register={register}
+            error={getError(errors, 'discapacidad')}
+          />
+          <BloqueNoSiSimple
+            label="¿Problemas de movilidad?"
+            name="problemas_movilidad"
+            register={register}
+            error={getError(errors, 'problemas_movilidad')}
+          />
+          <BloqueNoSiSimple
+            label="¿Lleva gafas o lentillas?"
+            name="gafas_lentillas"
+            register={register}
+            error={getError(errors, 'gafas_lentillas')}
+          />
+          <BloqueNoSiSimple
+            label="¿Lleva aparatos bucales?"
+            name="aparatos_bucales"
+            register={register}
+            error={getError(errors, 'aparatos_bucales')}
+          />
+          <Field label="Peso aproximado (kg)" error={getError(errors, 'peso_kg')}>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="p. ej. 38"
+              className={inputCls}
+              {...register('peso_kg')}
+            />
+          </Field>
+        </div>
+      </details>
+
+      {/* 7. Dieta */}
+      <Bloque>
+        <Pregunta requerido>¿Sigue alguna dieta especial?</Pregunta>
+        <RadioNoSi
+          name="dieta.respuesta"
+          register={register}
+          opciones={[
+            { value: 'no', label: 'No, come de todo' },
+            { value: 'si', label: 'Sí' },
+          ]}
+        />
+        {dietaResp === 'si' && (
+          <Field label="Describe la dieta" error={getError(errors, 'dieta.detalle')}>
+            <textarea rows={2} className={inputCls} {...register('dieta.detalle')} />
+          </Field>
         )}
-      </div>
+      </Bloque>
+
+      {/* 8. Come */}
+      <Bloque>
+        <Pregunta requerido>En relación a su edad, come</Pregunta>
+        <select
+          className={inputCls}
+          defaultValue=""
+          {...register('come')}
+        >
+          <option value="" disabled>
+            Selecciona…
+          </option>
+          {COME_OPTIONS.map((o) => (
+            <option key={o} value={o}>
+              {COME_LABEL[o]}
+            </option>
+          ))}
+        </select>
+        {getError(errors, 'come') && (
+          <p className="text-red-600 text-sm">{getError(errors, 'come')}</p>
+        )}
+      </Bloque>
+
+      {/* 9. Veces en campamentos */}
+      <Bloque>
+        <Pregunta requerido>Veces que ha ido a campamentos</Pregunta>
+        <select
+          className={inputCls}
+          defaultValue=""
+          {...register('veces_campamentos')}
+        >
+          <option value="" disabled>
+            Selecciona…
+          </option>
+          {CAMPAMENTOS_OPTIONS.map((o) => (
+            <option key={o} value={o}>
+              {CAMPAMENTOS_LABEL[o]}
+            </option>
+          ))}
+        </select>
+        {getError(errors, 'veces_campamentos') && (
+          <p className="text-red-600 text-sm">
+            {getError(errors, 'veces_campamentos')}
+          </p>
+        )}
+      </Bloque>
+
+      {/* 10. Cuestión familiar relevante */}
+      <Bloque>
+        <Pregunta requerido>
+          ¿Hay alguna cuestión familiar relevante para el equipo?
+        </Pregunta>
+        <RadioNoSi name="cuestion_familiar.respuesta" register={register} />
+        {cuestionResp === 'si' && (
+          <Field
+            label="Describe la cuestión"
+            error={getError(errors, 'cuestion_familiar.detalle')}
+          >
+            <textarea
+              rows={3}
+              className={inputCls}
+              {...register('cuestion_familiar.detalle')}
+            />
+          </Field>
+        )}
+      </Bloque>
+
+      {/* 11. Miedos (opcional) */}
+      <Bloque>
+        <Field label="¿Tiene miedos o necesidades especiales que debamos saber? (opcional)">
+          <textarea rows={2} className={inputCls} {...register('miedos')} />
+        </Field>
+      </Bloque>
+
+      {/* 12. Observaciones (opcional) */}
+      <Bloque>
+        <Field label="Observaciones generales (opcional)">
+          <textarea
+            rows={2}
+            className={inputCls}
+            {...register('observaciones')}
+          />
+        </Field>
+      </Bloque>
 
       {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
 
@@ -363,8 +752,31 @@ export function Seccion2Familia({
   )
 }
 
+// ----------------------------------------------------------------------------
+// Sub-componentes
+// ----------------------------------------------------------------------------
+
 const inputCls =
   'w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900'
+
+function Bloque({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-3">{children}</div>
+}
+
+function Pregunta({
+  children,
+  requerido,
+}: {
+  children: React.ReactNode
+  requerido?: boolean
+}) {
+  return (
+    <p className="text-sm font-medium text-slate-800">
+      {children}
+      {requerido && <span className="text-red-600 ml-0.5">*</span>}
+    </p>
+  )
+}
 
 function Field({
   label,
@@ -386,74 +798,66 @@ function Field({
   )
 }
 
-// Input de teléfono con selector de prefijo internacional.
-// El valor en el form se guarda como string concatenado "+34600111222".
-function parseTelefono(valor: string): { prefijo: string; digitos: string } {
-  if (typeof valor !== 'string' || !valor) {
-    return { prefijo: '+34', digitos: '' }
-  }
-  if (valor.startsWith('+')) {
-    // Ordenamos por longitud descendente para que +351 gane sobre +3.
-    const ordenados = [...PREFIJOS].sort(
-      (a, b) => b.code.length - a.code.length
-    )
-    for (const p of ordenados) {
-      if (valor.startsWith(p.code)) {
-        return { prefijo: p.code, digitos: valor.slice(p.code.length) }
-      }
-    }
-    // Prefijo desconocido en datos viejos: lo descartamos y caemos a +34.
-    return { prefijo: '+34', digitos: valor.replace(/^\+\d+/, '') }
-  }
-  // Sin prefijo (datos legacy) → asumimos España.
-  return { prefijo: '+34', digitos: valor }
-}
+type OpcionNoSi = { value: 'no' | 'si'; label: string }
+const OPCIONES_NOSI_DEFAULT: OpcionNoSi[] = [
+  { value: 'no', label: 'No' },
+  { value: 'si', label: 'Sí' },
+]
 
-function InputTelefono({
+function RadioNoSi({
   name,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  watch,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setValue,
+  register,
+  opciones = OPCIONES_NOSI_DEFAULT,
 }: {
   name: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  watch: any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setValue: any
+  register: any
+  opciones?: OpcionNoSi[]
 }) {
-  const valorActual = (watch(name) ?? '') as string
-  const { prefijo, digitos } = parseTelefono(valorActual)
-  const emit = (nuevoPrefijo: string, nuevosDigitos: string) =>
-    setValue(name, nuevoPrefijo + nuevosDigitos, {
-      shouldDirty: true,
-      shouldValidate: true,
-    })
   return (
-    <div className="flex gap-2">
-      <select
-        value={prefijo}
-        onChange={(e) => emit(e.target.value, digitos)}
-        className="rounded-lg border border-slate-300 px-2 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 bg-white shrink-0"
-        aria-label="Prefijo país"
-      >
-        {PREFIJOS.map((p) => (
-          <option key={p.code} value={p.code}>
-            {p.code} {p.label}
-          </option>
-        ))}
-      </select>
-      <input
-        type="tel"
-        inputMode="numeric"
-        autoComplete="tel"
-        maxLength={15}
-        pattern="[0-9]*"
-        placeholder="600111222"
-        value={digitos}
-        onChange={(e) => emit(prefijo, e.target.value.replace(/\D/g, ''))}
-        className={`${inputCls} flex-1`}
-      />
+    <div className="flex flex-wrap gap-4">
+      {opciones.map((o) => (
+        <label key={o.value} className="flex items-center gap-2 cursor-pointer">
+          <input type="radio" value={o.value} {...register(name)} />
+          <span>{o.label}</span>
+        </label>
+      ))}
     </div>
   )
+}
+
+function BloqueNoSiSimple({
+  label,
+  name,
+  register,
+  error,
+}: {
+  label: string
+  name: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: any
+  error?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-slate-800">{label}</p>
+      <RadioNoSi name={name} register={register} />
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+    </div>
+  )
+}
+
+// Helper para leer errores anidados en formato "a.b.c"
+function getError(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  errors: any,
+  path: string
+): string | undefined {
+  const parts = path.split('.')
+  let cur = errors
+  for (const p of parts) {
+    if (!cur) return undefined
+    cur = cur[p]
+  }
+  return cur?.message
 }

@@ -349,34 +349,37 @@ const COLUMNAS: Array<{
       fmtNoSi((e.respuestas as R | undefined)?.seccion3?.atencion_especial),
   },
   {
-    key: 'nivel_natacion',
-    header: 'Nivel natación',
-    width: 14,
-    get: (e) =>
-      ((e.respuestas as R | undefined)?.seccion6?.nivel_natacion?.nivel as string) ??
-      '',
-  },
-  {
-    key: 'agua_limitacion',
-    header: 'Limitación en agua',
-    width: 22,
-    get: (e) => fmtNoSi((e.respuestas as R | undefined)?.seccion6?.agua),
-  },
-  {
     key: 'imagen',
     header: 'Derechos de imagen',
     width: 22,
     get: (e) =>
-      ((e.respuestas as R | undefined)?.seccion6?.imagen?.decision as string) ??
-      '',
+      ((e.respuestas as R | undefined)?.seccion7?.imagen?.no_autorizo as
+        | boolean
+        | undefined) === true
+        ? 'no_autorizo'
+        : 'autorizo',
   },
   {
-    key: 'comunicaciones',
-    header: 'Comunicaciones',
-    width: 16,
+    key: 'excluir_email',
+    header: 'Excluye correo electrónico',
+    width: 22,
     get: (e) =>
-      ((e.respuestas as R | undefined)?.seccion6?.comunicaciones as string) ??
-      '',
+      ((e.respuestas as R | undefined)?.seccion7?.comunicaciones?.no_email as
+        | boolean
+        | undefined) === true
+        ? 'Sí'
+        : 'No',
+  },
+  {
+    key: 'excluir_postal',
+    header: 'Excluye correo postal',
+    width: 22,
+    get: (e) =>
+      ((e.respuestas as R | undefined)?.seccion7?.comunicaciones?.no_postal as
+        | boolean
+        | undefined) === true
+        ? 'Sí'
+        : 'No',
   },
   {
     key: 'observaciones',

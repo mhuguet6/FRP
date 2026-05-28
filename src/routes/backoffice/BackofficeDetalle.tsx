@@ -301,11 +301,81 @@ export function BackofficeDetalle() {
           <BloqueDatosClienta datos={datosClienta} />
         )}
 
-        {/* Sección 1: datos del participante */}
+        {/* Sección 1 — Apartado A: datos del participante */}
         <Bloque titulo="Datos del participante">
           <Row k="Nombre y apellidos" v={`${expediente.alumno_nombre ?? ''} ${expediente.alumno_apellidos ?? ''}`} />
           <Row k="Fecha de nacimiento" v={expediente.fecha_nacimiento ?? '—'} />
+          <Row
+            k="Curso escolar"
+            v={
+              (s1?.curso as string | undefined) === 'Otros'
+                ? `Otros — ${(s1?.curso_otro as string) ?? '—'}`
+                : (s1?.curso as string | undefined) ?? '—'
+            }
+          />
+        </Bloque>
+
+        {/* Sección 1 — Apartado B: contacto a familiares */}
+        <Bloque titulo="Contacto a familiares">
+          <Row
+            k="Relación familiar"
+            v={(s1?.relacion_familiar as string | undefined) ?? '—'}
+          />
+          <Row k="Teléfono" v={(s1?.telefono as string | undefined) ?? '—'} />
+          <Row k="Email" v={(s1?.email as string | undefined) ?? '—'} />
           <Row k="Dirección" v={(s1?.direccion as string) ?? '—'} />
+          <Row
+            k="Mejor día para llamar"
+            v={(() => {
+              const ds = (s1?.dias_llamada as string[] | undefined) ?? []
+              // Compat con datos viejos cuando era string único
+              const legacy = s1?.dia_llamada as string | undefined
+              const arr = ds.length > 0 ? ds : legacy ? [legacy] : []
+              if (arr.length === 0) return '—'
+              return arr
+                .map((d) =>
+                  d === 'cualquiera' ? 'Cualquier día' : formatearFecha(d)
+                )
+                .join(', ')
+            })()}
+          />
+          {((s1?.contactos_extra as Array<R> | undefined) ?? []).length > 0 && (
+            <div className="mt-2">
+              <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                Contactos adicionales
+              </div>
+              {((s1?.contactos_extra as Array<R> | undefined) ?? []).map(
+                (c, i) => (
+                  <div
+                    key={i}
+                    className="text-sm text-slate-900 mb-1 border-b border-slate-100 last:border-0 pb-1"
+                  >
+                    <strong>{i + 1}.</strong> {c.relacion as string} —{' '}
+                    <a href={`tel:${c.telefono as string}`} className="underline">
+                      {c.telefono as string}
+                    </a>
+                    {c.email ? ` · ${c.email as string}` : ''}
+                    {(() => {
+                      const ds = (c.dias_llamada as string[] | undefined) ?? []
+                      const legacy = c.dia_llamada as string | undefined
+                      const arr = ds.length > 0 ? ds : legacy ? [legacy] : []
+                      if (arr.length === 0) return ''
+                      return (
+                        ' · ' +
+                        arr
+                          .map((d) =>
+                            d === 'cualquiera'
+                              ? 'Cualquier día'
+                              : formatearFecha(d)
+                          )
+                          .join(', ')
+                      )
+                    })()}
+                  </div>
+                )
+              )}
+            </div>
+          )}
         </Bloque>
 
         {/* Sección 2: familia y contactos */}
@@ -428,47 +498,11 @@ export function BackofficeDetalle() {
           <ConociendoteFamilia v={s5?.familia as R | undefined} />
         </BloqueColapsable>
 
-        {/* Sección 6: autorizaciones */}
-        <Bloque titulo="Autorizaciones y normas">
-          <Row k="Comunicaciones de la Fundación" v={s6?.comunicaciones as string | undefined} />
-          <Row
-            k="Derechos de imagen"
-            v={(s6?.imagen as R | undefined)?.decision as string | undefined}
-          />
-          {(s6?.imagen as R | undefined)?.parcial_detalle ? (
-            <Row
-              k="Detalle imagen parcial"
-              v={(s6?.imagen as R | undefined)?.parcial_detalle as string}
-            />
-          ) : null}
+        {/* Sección 6: decálogo de convivencia */}
+        <Bloque titulo="Decálogo de convivencia">
           <RowNoSi
             k="Observaciones para el equipo"
             v={s6?.observaciones_generales as R | undefined}
-          />
-          <RowNoSi
-            k="Limitación en actividades de agua"
-            v={s6?.agua as R | undefined}
-          />
-          <Row
-            k="Nivel de natación"
-            v={(s6?.nivel_natacion as R | undefined)?.nivel as string | undefined}
-          />
-          <Row
-            k="Llamada con familias — fechas elegidas"
-            v={
-              (() => {
-                const f = s6?.llamada_familias as R | undefined
-                const fechas = (f?.fechas_seleccionadas as string[] | undefined) ?? []
-                const cualquiera = (f?.cualquiera as boolean | undefined) ? 'cualquier día' : null
-                const otra = f?.otra_preferencia as string | undefined
-                const arr = [
-                  ...fechas.map(formatearFecha),
-                  cualquiera,
-                  otra,
-                ].filter(Boolean)
-                return arr.length ? arr.join(', ') : '—'
-              })()
-            }
           />
           <Row
             k="Decálogo leído"
@@ -484,13 +518,45 @@ export function BackofficeDetalle() {
                 : 'Incompleto'
             }
           />
-        </Bloque>
-
-        {/* Sección 7: firma niño + firmas */}
-        <Bloque titulo="Conformidad del/de la participante">
           <Row
             k="Nombre escrito por el/la participante"
-            v={(s7?.firma_nino_nombre as string | undefined) ?? '—'}
+            v={(s6?.firma_nino_nombre as string | undefined) ?? '—'}
+          />
+        </Bloque>
+
+        {/* Sección 7: derechos de imagen, datos y firma del tutor */}
+        <Bloque titulo="Derechos de imagen y datos">
+          <Row
+            k="Excluye correo electrónico"
+            v={
+              (s7?.comunicaciones as R | undefined)?.no_email === true
+                ? 'Sí'
+                : 'No'
+            }
+          />
+          <Row
+            k="Excluye correo postal"
+            v={
+              (s7?.comunicaciones as R | undefined)?.no_postal === true
+                ? 'Sí'
+                : 'No'
+            }
+          />
+          <Row
+            k="Autoriza uso de imágenes"
+            v={
+              (s7?.imagen as R | undefined)?.no_autorizo === true
+                ? 'No autoriza'
+                : 'Sí'
+            }
+          />
+          <Row
+            k="Nombre del/de la participante"
+            v={(s7?.participante_nombre as string | undefined) ?? '—'}
+          />
+          <Row
+            k="Nombre del familiar/tutor que firma"
+            v={(s7?.tutor_nombre as string | undefined) ?? '—'}
           />
         </Bloque>
 

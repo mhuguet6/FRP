@@ -258,7 +258,6 @@ export function FormularioExpediente({ modoAdmin = false }: Props = {}) {
             <Seccion7Revision
               expediente={expediente}
               onPrev={() => irSeccion(6)}
-              onGoToSeccion={irSeccion}
               onEnviado={async () => {
                 const updated = await getExpediente(expediente.id)
                 setExpediente(updated)

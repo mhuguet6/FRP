@@ -109,14 +109,7 @@ export function validarParaEnvio(expediente: Expediente): CampoFaltante[] {
     })
   }
 
-  // Sección 6
-  if (!get(r, 'seccion6.imagen.decision'))
-    faltantes.push({ seccion: 6, descripcion: 'Decisión sobre derechos de imagen' })
-  if (!get(r, 'seccion6.comunicaciones'))
-    faltantes.push({
-      seccion: 6,
-      descripcion: 'Preferencia de comunicaciones de la Fundación',
-    })
+  // Sección 6 — decálogo + reglamento + firma tutor (firma se valida en S6)
   if (!get(r, 'seccion6.decalogo_leido'))
     faltantes.push({ seccion: 6, descripcion: 'Confirmar lectura del decálogo' })
   if (!get(r, 'seccion6.reglamento_leido'))
@@ -132,44 +125,54 @@ export function validarParaEnvio(expediente: Expediente): CampoFaltante[] {
       descripcion: 'Aceptar las consecuencias del incumplimiento',
     })
 
+  // Sección 7 — nombres del participante y del familiar/tutor que firma.
+  // La firma manuscrita se valida en el propio paso de envío.
+  if (!get(r, 'seccion7.participante_nombre'))
+    faltantes.push({
+      seccion: 7,
+      descripcion: 'Nombre y apellidos del/de la participante',
+    })
+  if (!get(r, 'seccion7.tutor_nombre'))
+    faltantes.push({
+      seccion: 7,
+      descripcion: 'Nombre y apellidos del familiar/tutor',
+    })
+
   return faltantes
 }
 
 // ¿Hay que contactar con la familia para confirmar derechos de imagen?
-// Aplica si han marcado "no autorizo" Y aún no se ha registrado confirmación.
+// Aplica si han marcado la casilla de exclusión Y aún no se ha registrado
+// confirmación por staff.
 export function requiereConfirmacionImagen(exp: Expediente): boolean {
   if (exp.imagen_confirmada_at) return false
-  const dec = (
-    (exp.respuestas as Record<string, R> | undefined)?.seccion6 as R | undefined
-  )?.imagen?.decision as string | undefined
-  return dec === 'no_autorizo'
+  const noAutorizo = (
+    (exp.respuestas as Record<string, R> | undefined)?.seccion7 as R | undefined
+  )?.imagen?.no_autorizo as boolean | undefined
+  return noAutorizo === true
 }
 
 export function decisionImagenLabel(exp: Expediente): string | null {
-  const dec = (
-    (exp.respuestas as Record<string, R> | undefined)?.seccion6 as R | undefined
-  )?.imagen?.decision as string | undefined
-  if (dec === 'no_autorizo') return 'No autoriza imagen'
+  const noAutorizo = (
+    (exp.respuestas as Record<string, R> | undefined)?.seccion7 as R | undefined
+  )?.imagen?.no_autorizo as boolean | undefined
+  if (noAutorizo === true) return 'No autoriza imagen'
   return null
 }
 
-export function firmasRequeridas(expediente: Expediente): Array<{
+export function firmasRequeridas(_expediente: Expediente): Array<{
   tipo: string
   titulo: string
 }> {
-  const r = expediente.respuestas as R | undefined
-  const lista: Array<{ tipo: string; titulo: string }> = [
-    { tipo: 'datos_imagen', titulo: 'Protección de datos y derechos de imagen' },
+  // Firmas que recoge la Sección 7 (revisión final).
+  // - `medicacion`: recogida en S3 (Autorizaciones médicas).
+  // - `vacunacion`: eliminada (ahora es solo declaración por radio en S3).
+  // - `reglamento_tutor`: recogida en S6 (Decálogo de convivencia).
+  // Solo queda `datos_imagen` en S7.
+  return [
+    {
+      tipo: 'datos_imagen',
+      titulo: 'Protección de datos y derechos de imagen',
+    },
   ]
-  if (get(r, 'seccion3.vacunacion.opcion') === '1') {
-    lista.push({ tipo: 'vacunacion', titulo: 'Declaración de vacunación' })
-  }
-  if (get(r, 'seccion4.durante_campus.respuesta') === 'si') {
-    lista.push({ tipo: 'medicacion', titulo: 'Autorización de medicación' })
-  }
-  lista.push({
-    tipo: 'reglamento_tutor',
-    titulo: 'Conformidad con el decálogo y el reglamento',
-  })
-  return lista
 }

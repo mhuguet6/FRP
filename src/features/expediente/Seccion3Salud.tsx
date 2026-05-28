@@ -1,149 +1,58 @@
-import { useEffect, useState } from 'react'
-import { useForm, type UseFormRegister, type UseFormWatch } from 'react-hook-form'
+import { useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import type { CampusEdicion, Expediente } from './api'
 import { useAutosave } from '../../lib/useAutosave'
 import { IndicadorGuardado } from '../../components/ui/IndicadorGuardado'
-import { ErrorBanner, MSG_FALTAN_RESPUESTAS } from '../../components/ui/ErrorBanner'
-import { FileUpload } from './FileUpload'
+import {
+  ErrorBanner,
+  MSG_FALTAN_RESPUESTAS,
+} from '../../components/ui/ErrorBanner'
+import { SignatureCanvas, type SignatureCanvasHandle } from './SignatureCanvas'
+import { subirYRegistrarFirma, textoAutorizacion } from './firmaService'
 
 // ----------------------------------------------------------------------------
 // Schema
 // ----------------------------------------------------------------------------
 
-const noSi = z.union([z.literal('no'), z.literal('si')], {
-  error: 'Selecciona una opción',
-})
+const VACUNACION_OPTS = ['al_dia', 'parcial', 'exento'] as const
+const VACUNACION_LABEL: Record<(typeof VACUNACION_OPTS)[number], string> = {
+  al_dia: 'Tiene el calendario de vacunación al día',
+  parcial: 'Tiene vacunación parcial',
+  exento: 'Está exento/a por razones médicas',
+}
 
-const noSiTexto = z
+const schema = z
   .object({
-    respuesta: noSi,
-    detalle: z.string().optional(),
-  })
-  .refine(
-    (v) => v.respuesta !== 'si' || (v.detalle?.trim().length ?? 0) > 0,
-    { path: ['detalle'], message: 'Especifica' }
-  )
-
-const ANTECEDENTES_OPTS = [
-  'Enfermedades respiratorias',
-  'Accidentes relevantes',
-  'Trastornos digestivos',
-  'Enfermedades cutáneas',
-  'Intervenciones quirúrgicas',
-] as const
-
-const PATOLOGIAS_OPTS = [
-  'Anginas',
-  'Resfriados frecuentes',
-  'Faringitis',
-  'Empachos',
-  'Estreñimiento',
-  'Dolor de oídos',
-  'Sinusitis',
-  'Reumatismo infantil',
-  'Dolor de muelas o dientes',
-  'Enuresis nocturna',
-  'Insomnio',
-] as const
-
-const schema = z.object({
-  situacion_familiar: noSiTexto,
-
-  antecedentes_medicos: z
-    .object({
-      respuesta: noSi,
-      tipos: z.array(z.string()),
-      otras: z.string().optional(),
-      comentarios: z.string().optional(),
-    })
-    .refine(
-      (v) =>
-        v.respuesta !== 'si' ||
-        v.tipos.length > 0 ||
-        (v.otras?.trim().length ?? 0) > 0 ||
-        (v.comentarios?.trim().length ?? 0) > 0,
-      { path: ['tipos'], message: 'Marca alguna opción o añade detalle' }
-    ),
-
-  alergias: z
-    .object({
-      respuesta: noSi,
-      que: z.string().optional(),
-      reaccion: z.string().optional(),
-    })
-    .refine(
-      (v) => v.respuesta !== 'si' || (v.que?.trim().length ?? 0) > 0,
-      { path: ['que'], message: 'Indica a qué' }
-    ),
-
-  mareos: noSiTexto,
-
-  alimentacion: z.object({
-    come: z.union(
-      [
-        z.literal('poco'),
-        z.literal('normal'),
-        z.literal('mucho'),
-        z.literal('varia'),
-      ],
+    tutor_autoriza_nombre: z.string().min(1, 'Obligatorio'),
+    autoriza_medicacion: z.union(
+      [z.literal('si'), z.literal('no_toma')],
       { error: 'Selecciona una opción' }
     ),
-    dieta: noSiTexto,
-    peso_kg: z.string().optional(),
-  }),
-
-  experiencia_colonias: z.object({
-    veces: z.union(
-      [z.literal('nunca'), z.literal('una_vez'), z.literal('varias_veces')],
-      { error: 'Selecciona una opción' }
-    ),
-    comentarios: z.string().optional(),
-  }),
-
-  patologias: z
-    .object({
-      respuesta: noSi,
-      tipos: z.array(z.string()),
-      otros: z.string().optional(),
-    })
-    .refine(
-      (v) =>
-        v.respuesta !== 'si' ||
-        v.tipos.length > 0 ||
-        (v.otros?.trim().length ?? 0) > 0,
-      { path: ['tipos'], message: 'Marca alguna opción' }
-    ),
-
-  covid: z.object({
-    info: noSiTexto,
-    dosis: z.string().optional(),
-  }),
-
-  discapacidad: noSiTexto,
-  movilidad: noSiTexto,
-  motricidad: noSiTexto,
-
-  gafas_lentillas: noSiTexto,
-  aparatos_bucales: noSiTexto,
-
-  miedos: noSiTexto,
-  caracter: noSiTexto,
-  atencion_especial: noSiTexto,
-
-  vacunacion: z.object({
-    opcion: z.union([z.literal('1'), z.literal('2')], {
+    vacunacion_estado: z.enum(VACUNACION_OPTS, {
       error: 'Selecciona una opción',
     }),
-    // Opción 1: declaración (firma se hace en sección 7)
-    declaro_vacunas: z.boolean().optional(),
-    // Opción 2: archivo subido (path)
-    certificado_path: z.string().nullable().optional(),
-  }),
-})
+    vacunacion_detalle: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.vacunacion_estado === 'parcial' && !v.vacunacion_detalle?.trim()) {
+      ctx.addIssue({
+        path: ['vacunacion_detalle'],
+        code: z.ZodIssueCode.custom,
+        message: '¿Qué vacunas faltan o qué consideración hay?',
+      })
+    }
+    if (v.vacunacion_estado === 'exento' && !v.vacunacion_detalle?.trim()) {
+      ctx.addIssue({
+        path: ['vacunacion_detalle'],
+        code: z.ZodIssueCode.custom,
+        message: 'Explica la razón',
+      })
+    }
+  })
 
-export type Seccion3Values = z.infer<typeof schema>
+export type Seccion3Values = z.input<typeof schema>
 
 // ----------------------------------------------------------------------------
 // Componente
@@ -154,459 +63,293 @@ type Props = {
   edicion: CampusEdicion | null
   onSave: (patch: {
     columnas: Partial<Expediente>
-    respuestas: Partial<Seccion3Values>
+    respuestas: Record<string, unknown>
   }) => Promise<void>
   onPrev: () => void
   onNext: () => Promise<void>
 }
 
-export function Seccion3Salud({ expediente, onSave, onPrev, onNext }: Props) {
+export function Seccion3Salud({
+  expediente,
+  edicion,
+  onSave,
+  onPrev,
+  onNext,
+}: Props) {
   const previo =
     (expediente.respuestas?.seccion3 as Partial<Seccion3Values> | undefined) ??
     {}
 
-  const form = useForm<Seccion3Values>({
-    resolver: zodResolver(schema),
-    mode: 'onBlur',
-    defaultValues: defaultsFromPrevio(previo, expediente),
-  })
+  // ¿Hay medicación declarada en S2? Determina si la firma de medicación es
+  // obligatoria al confirmar la autorización en esta sección.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const s2 = (expediente.respuestas?.seccion2 as any) ?? {}
+  const tieneMedicacionEnS2 =
+    s2?.medicacion?.respuesta === 'si' &&
+    Array.isArray(s2?.medicacion?.medicamentos) &&
+    s2.medicacion.medicamentos.length > 0
 
   const {
     register,
     handleSubmit,
     watch,
-    setValue,
     formState: { errors, isSubmitting },
-  } = form
+  } = useForm<Seccion3Values>({
+    resolver: zodResolver(schema),
+    mode: 'onBlur',
+    defaultValues: {
+      tutor_autoriza_nombre: previo.tutor_autoriza_nombre ?? '',
+      autoriza_medicacion:
+        previo.autoriza_medicacion ?? (undefined as never),
+      vacunacion_estado:
+        (previo.vacunacion_estado as Seccion3Values['vacunacion_estado']) ??
+        (undefined as never),
+      vacunacion_detalle: previo.vacunacion_detalle ?? '',
+    },
+  })
 
   const values = watch()
+  const autoriza = watch('autoriza_medicacion')
+  const vacEstado = watch('vacunacion_estado')
 
   const saveStatus = useAutosave({
     data: values,
     enabled: true,
     save: async (v) => {
       await onSave({
-        columnas: {
-          tiene_alergias:
-            v.alergias?.respuesta === 'si'
-              ? true
-              : v.alergias?.respuesta === 'no'
-                ? false
-                : null,
-          detalle_alergias:
-            v.alergias?.respuesta === 'si' ? v.alergias?.que ?? null : null,
-        },
-        respuestas: v,
+        columnas: {},
+        respuestas: v as Record<string, unknown>,
       })
     },
   })
 
-  useEffect(() => {
-    // Si seleccionan opción 2 y no han subido nada todavía, no hacemos nada.
-    // Si seleccionan opción 1, limpiamos certificado anterior si lo había.
-    if (values.vacunacion?.opcion === '1' && values.vacunacion?.certificado_path) {
-      setValue('vacunacion.certificado_path', null)
-    }
-  }, [values.vacunacion?.opcion, values.vacunacion?.certificado_path, setValue])
-
+  // Firma de medicación — solo si autoriza Y hay medicación en S2.
+  const necesitaFirma = autoriza === 'si' && tieneMedicacionEnS2
+  const firmaRef = useRef<SignatureCanvasHandle>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  const alumnoNombre = `${expediente.alumno_nombre ?? ''} ${
+    expediente.alumno_apellidos ?? ''
+  }`.trim()
+
   const onValid = async () => {
     setSubmitError(null)
+
+    // Si necesita firma, validar canvas + subir
+    if (necesitaFirma) {
+      const ref = firmaRef.current
+      if (!ref || ref.isEmpty()) {
+        setSubmitError('Falta firmar la autorización de medicación.')
+        return
+      }
+      setEnviando(true)
+      try {
+        const blob = await ref.toBlob()
+        if (!blob) throw new Error('No se pudo generar la firma')
+        const ahora = new Date().toISOString()
+        const texto = textoAutorizacion('medicacion', {
+          alumnoNombre: alumnoNombre || '[participante]',
+          timestamp: ahora,
+        })
+        await subirYRegistrarFirma({
+          expedienteId: expediente.id,
+          tipo: 'medicacion',
+          blob,
+          firmadoPor:
+            expediente.tutor_email ?? values.tutor_autoriza_nombre ?? 'tutor/a',
+          textoAutorizacion: texto,
+        })
+      } catch (e) {
+        setSubmitError(
+          e instanceof Error ? e.message : 'No se pudo guardar la firma'
+        )
+        setEnviando(false)
+        return
+      }
+      setEnviando(false)
+    }
+
     await onNext()
   }
+
   const onInvalid = () => setSubmitError(MSG_FALTAN_RESPUESTAS)
 
   return (
     <form
       onSubmit={handleSubmit(onValid, onInvalid)}
-      className="bg-white rounded-2xl border border-slate-200 p-6 space-y-8"
+      className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Salud</h2>
+          <h2 className="text-xl font-semibold text-slate-900">
+            Autorizaciones médicas
+          </h2>
           <p className="text-slate-600 text-sm mt-1">
-            Información médica del/de la participante. Marca No si no hay nada
-            especial que declarar.
+            3 minutos. Sin esta autorización firmada no podemos suministrar
+            medicación durante el Campus
+            {edicion?.fecha_inicio && edicion?.fecha_fin && (
+              <>
+                {' '}({formatearRangoCampus(edicion.fecha_inicio, edicion.fecha_fin)})
+              </>
+            )}
+            .
           </p>
         </div>
         <IndicadorGuardado status={saveStatus} />
       </div>
 
-      <NoSiBloque
-        name="situacion_familiar"
-        label="Situación familiar relevante"
-        question="¿Hay alguna situación familiar que sea importante que conozcan los monitores?"
-        register={register}
-        watch={watch}
-        error={(errors.situacion_familiar as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <Bloque>
-        <Titulo>Antecedentes médicos relevantes</Titulo>
-        <Pregunta>
-          ¿El/la participante tiene o ha tenido alguna condición médica
-          relevante que debamos conocer?
-        </Pregunta>
-        <RadioNoSi name="antecedentes_medicos.respuesta" register={register} />
-        {watch('antecedentes_medicos.respuesta') === 'si' && (
-          <>
-            <CheckboxList
-              name="antecedentes_medicos.tipos"
-              options={ANTECEDENTES_OPTS}
-              register={register}
-            />
-            <Field label="Otras enfermedades">
-              <input
-                type="text"
-                className={inputCls}
-                {...register('antecedentes_medicos.otras')}
-              />
-            </Field>
-            <Field label="Comentarios médicos adicionales">
-              <textarea
-                rows={2}
-                className={inputCls}
-                {...register('antecedentes_medicos.comentarios')}
-              />
-            </Field>
-            {(errors.antecedentes_medicos as { tipos?: { message?: string } })?.tipos?.message && (
-              <p className="text-red-600 text-sm">
-                {(errors.antecedentes_medicos as { tipos?: { message?: string } })?.tipos?.message}
-              </p>
-            )}
-          </>
-        )}
-        {(errors.antecedentes_medicos as { respuesta?: { message?: string } })?.respuesta?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.antecedentes_medicos as { respuesta?: { message?: string } })?.respuesta?.message}
-          </p>
-        )}
-      </Bloque>
-
-      <Bloque>
-        <Titulo>Alergias</Titulo>
-        <Pregunta>¿El/la participante tiene alguna alergia conocida?</Pregunta>
-        <RadioNoSi name="alergias.respuesta" register={register} />
-        {watch('alergias.respuesta') === 'si' && (
-          <>
-            <Field
-              label="¿A qué?"
-              error={(errors.alergias as { que?: { message?: string } })?.que?.message}
-            >
-              <input
-                type="text"
-                className={inputCls}
-                {...register('alergias.que')}
-              />
-            </Field>
-            <Field label="Tipo de reacción o gravedad, si se conoce">
-              <textarea
-                rows={2}
-                className={inputCls}
-                {...register('alergias.reaccion')}
-              />
-            </Field>
-          </>
-        )}
-        {(errors.alergias as { respuesta?: { message?: string } })?.respuesta?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.alergias as { respuesta?: { message?: string } })?.respuesta?.message}
-          </p>
-        )}
-      </Bloque>
-
-      <NoSiBloque
-        name="mareos"
-        label="Mareos"
-        question="¿El/la participante se marea con facilidad?"
-        detailLabel="¿Cuándo o en qué situaciones?"
-        register={register}
-        watch={watch}
-        error={(errors.mareos as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <Bloque>
-        <Titulo>Alimentación</Titulo>
-        <Pregunta>Con relación a su edad, el/la participante come:</Pregunta>
-        <RadioInline
-          name="alimentacion.come"
-          options={[
-            { value: 'poco', label: 'Poco' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'mucho', label: 'Mucho' },
-            { value: 'varia', label: 'Varía / depende' },
-          ]}
-          register={register}
+      {/* 1. Nombre del familiar/tutor que autoriza */}
+      <Field
+        label="Nombre del familiar/tutor que autoriza"
+        requerido
+        error={errors.tutor_autoriza_nombre?.message}
+      >
+        <input
+          type="text"
+          autoComplete="name"
+          className={inputCls}
+          {...register('tutor_autoriza_nombre')}
         />
-        {(errors.alimentacion as { come?: { message?: string } })?.come?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.alimentacion as { come?: { message?: string } })?.come?.message}
-          </p>
-        )}
+      </Field>
 
-        <Pregunta>
-          ¿Sigue alguna dieta especial o tiene restricción alimentaria?
-        </Pregunta>
-        <RadioNoSi name="alimentacion.dieta.respuesta" register={register} />
-        {watch('alimentacion.dieta.respuesta') === 'si' && (
-          <Field
-            label="Especificar"
-            error={
-              (errors.alimentacion as { dieta?: { detalle?: { message?: string } } })
-                ?.dieta?.detalle?.message
-            }
-          >
-            <textarea
-              rows={2}
-              className={inputCls}
-              {...register('alimentacion.dieta.detalle')}
-            />
-          </Field>
-        )}
-
-        <Field label="Peso habitual aproximado (kg)">
-          <InputNumerico
-            name="alimentacion.peso_kg"
-            register={register}
-            permitirDecimal
-            placeholder="p.ej. 35.5"
-          />
-        </Field>
-      </Bloque>
-
-      <Bloque>
-        <Titulo>Experiencia previa en colonias o campamentos</Titulo>
-        <Pregunta>¿Cuántas veces ha ido de colonias o campamento?</Pregunta>
-        <RadioInline
-          name="experiencia_colonias.veces"
-          options={[
-            { value: 'nunca', label: 'Nunca' },
-            { value: 'una_vez', label: 'Una vez' },
-            { value: 'varias_veces', label: 'Varias veces' },
-          ]}
-          register={register}
-        />
-        {(errors.experiencia_colonias as { veces?: { message?: string } })?.veces?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.experiencia_colonias as { veces?: { message?: string } })?.veces?.message}
-          </p>
-        )}
-        <Field label="Comentarios (opcional)">
-          <textarea
-            rows={2}
-            className={inputCls}
-            {...register('experiencia_colonias.comentarios')}
-          />
-        </Field>
-      </Bloque>
-
-      <Bloque>
-        <Titulo>Patologías o molestias frecuentes</Titulo>
-        <Pregunta>
-          ¿El/la participante sufre alguna patología, molestia o situación
-          recurrente que debamos tener en cuenta?
-        </Pregunta>
-        <RadioNoSi name="patologias.respuesta" register={register} />
-        {watch('patologias.respuesta') === 'si' && (
-          <>
-            <CheckboxList
-              name="patologias.tipos"
-              options={PATOLOGIAS_OPTS}
-              register={register}
-            />
-            <Field label="Otros">
-              <input
-                type="text"
-                className={inputCls}
-                {...register('patologias.otros')}
-              />
-            </Field>
-            {(errors.patologias as { tipos?: { message?: string } })?.tipos?.message && (
-              <p className="text-red-600 text-sm">
-                {(errors.patologias as { tipos?: { message?: string } })?.tipos?.message}
-              </p>
-            )}
-          </>
-        )}
-      </Bloque>
-
-      <Bloque>
-        <Titulo>COVID-19</Titulo>
-        <Pregunta>
-          ¿Hay alguna información relevante relacionada con COVID-19 que debamos
-          conocer?
-        </Pregunta>
-        <RadioNoSi name="covid.info.respuesta" register={register} />
-        {watch('covid.info.respuesta') === 'si' && (
-          <Field
-            label="Especificar"
-            error={(errors.covid as { info?: { detalle?: { message?: string } } })?.info?.detalle?.message}
-          >
-            <textarea
-              rows={2}
-              className={inputCls}
-              {...register('covid.info.detalle')}
-            />
-          </Field>
-        )}
-        <Field label="Si está vacunado/a, número de dosis (opcional)">
-          <InputNumerico
-            name="covid.dosis"
-            register={register}
-            placeholder="0, 1, 2…"
-          />
-        </Field>
-      </Bloque>
-
-      <NoSiBloque
-        name="discapacidad"
-        label="Discapacidad"
-        question="¿El/la participante tiene alguna discapacidad que debamos conocer?"
-        detailLabel="Tipo y apoyo necesario"
-        register={register}
-        watch={watch}
-        error={(errors.discapacidad as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="movilidad"
-        label="Movilidad"
-        question="¿Tiene algún problema de movilidad?"
-        register={register}
-        watch={watch}
-        error={(errors.movilidad as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="motricidad"
-        label="Motricidad"
-        question="¿Tiene alguna dificultad motriz?"
-        register={register}
-        watch={watch}
-        error={(errors.motricidad as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="gafas_lentillas"
-        label="Gafas o lentillas"
-        question="¿El/la participante lleva gafas o lentillas?"
-        register={register}
-        watch={watch}
-        error={(errors.gafas_lentillas as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="aparatos_bucales"
-        label="Aparatos bucales"
-        question="¿El/la participante lleva aparatos bucales?"
-        register={register}
-        watch={watch}
-        error={(errors.aparatos_bucales as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="miedos"
-        label="Miedos o inseguridades"
-        question="¿Tiene miedo a algo en especial que debamos conocer?"
-        register={register}
-        watch={watch}
-        error={(errors.miedos as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="caracter"
-        label="Carácter y convivencia"
-        question="¿Hay alguna característica de su carácter que debamos tener en cuenta para ayudarle mejor durante el Campus?"
-        register={register}
-        watch={watch}
-        error={(errors.caracter as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <NoSiBloque
-        name="atencion_especial"
-        label="Atención especial"
-        question="¿Necesita alguna atención especial durante el Campus?"
-        detailLabel="Motivo y tipo de atención necesaria"
-        register={register}
-        watch={watch}
-        error={(errors.atencion_especial as { detalle?: { message?: string } })?.detalle?.message}
-      />
-
-      <Bloque>
-        <Titulo>Vacunación</Titulo>
-        <Pregunta>Selecciona una de las dos opciones:</Pregunta>
-        <div className="space-y-2">
-          <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50">
+      {/* 2. Autorización de medicación */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-800">
+          Autorizo al Campus FRP a suministrar medicación
+          <span className="text-red-600 ml-0.5">*</span>
+        </p>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="radio"
-              value="1"
-              className="mt-1"
-              {...register('vacunacion.opcion')}
+              value="si"
+              {...register('autoriza_medicacion')}
             />
-            <div>
-              <div className="font-medium text-slate-900">
-                Tengo la cartilla de vacunación
-              </div>
-              <div className="text-sm text-slate-600 mt-0.5">
-                Firmarás la declaración al final del formulario.
-              </div>
-            </div>
+            <span>Sí, autorizo</span>
           </label>
-          <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="radio"
-              value="2"
-              className="mt-1"
-              {...register('vacunacion.opcion')}
+              value="no_toma"
+              {...register('autoriza_medicacion')}
             />
-            <div className="flex-1">
-              <div className="font-medium text-slate-900">
-                Aporto certificado médico
-              </div>
-              <div className="text-sm text-slate-600 mt-0.5">
-                Sube una foto o PDF del certificado del médico.
-              </div>
-              {watch('vacunacion.opcion') === '2' && (
-                <div className="mt-3">
-                  <FileUpload
-                    expedienteId={expediente.id}
-                    carpeta="vacunacion"
-                    path={watch('vacunacion.certificado_path') ?? null}
-                    onChange={(path) =>
-                      setValue('vacunacion.certificado_path', path, {
-                        shouldDirty: true,
-                      })
-                    }
-                    emptyLabel="+ Subir certificado (foto o PDF)"
-                  />
-                </div>
-              )}
-            </div>
+            <span>Mi hijo/a no toma ninguna medicación</span>
           </label>
         </div>
-        {(errors.vacunacion as { opcion?: { message?: string } })?.opcion?.message && (
+        {errors.autoriza_medicacion?.message && (
           <p className="text-red-600 text-sm">
-            {(errors.vacunacion as { opcion?: { message?: string } })?.opcion?.message}
+            {errors.autoriza_medicacion.message as string}
           </p>
         )}
-      </Bloque>
+        {autoriza === 'si' && !tieneMedicacionEnS2 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs p-3 mt-2">
+            ⚠ Has marcado que autorizas pero en la sección 2 (Salud) no hay
+            medicación registrada. Vuelve a la sección 2 a añadir los
+            medicamentos antes de firmar aquí.
+          </div>
+        )}
+      </div>
+
+      {/* 3. Declaración de vacunación */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-800">
+          Declaración de vacunación
+          <span className="text-red-600 ml-0.5">*</span>
+        </p>
+        <div className="flex flex-col gap-2">
+          {VACUNACION_OPTS.map((opt) => (
+            <label
+              key={opt}
+              className="flex items-start gap-2 cursor-pointer"
+            >
+              <input
+                type="radio"
+                value={opt}
+                className="mt-1"
+                {...register('vacunacion_estado')}
+              />
+              <span>{VACUNACION_LABEL[opt]}</span>
+            </label>
+          ))}
+        </div>
+        {errors.vacunacion_estado?.message && (
+          <p className="text-red-600 text-sm">
+            {errors.vacunacion_estado.message as string}
+          </p>
+        )}
+
+        {vacEstado === 'parcial' && (
+          <Field
+            label="¿Qué vacunas faltan o qué consideración hay?"
+            requerido
+            error={errors.vacunacion_detalle?.message}
+          >
+            <textarea
+              rows={3}
+              className={inputCls}
+              {...register('vacunacion_detalle')}
+            />
+          </Field>
+        )}
+        {vacEstado === 'exento' && (
+          <Field
+            label="Explica la razón"
+            requerido
+            error={errors.vacunacion_detalle?.message}
+          >
+            <textarea
+              rows={3}
+              className={inputCls}
+              {...register('vacunacion_detalle')}
+            />
+          </Field>
+        )}
+      </div>
+
+      {/* 4. Firma — solo si autoriza Y hay medicación en S2 */}
+      {necesitaFirma && (
+        <div className="space-y-2 rounded-xl border border-slate-200 p-4">
+          <div className="text-sm font-semibold text-slate-900">
+            Firma del familiar/tutor
+          </div>
+          <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
+            {textoAutorizacion('medicacion', {
+              alumnoNombre: alumnoNombre || '[participante]',
+              timestamp: new Date().toISOString(),
+            })}
+          </div>
+          <SignatureCanvas
+            ref={firmaRef}
+            ariaLabel="Firma autorización de medicación"
+          />
+          <button
+            type="button"
+            onClick={() => firmaRef.current?.clear()}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Limpiar firma
+          </button>
+        </div>
+      )}
 
       {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
 
-      <div className="flex justify-between gap-3 pt-2 border-t border-slate-200">
+      <div className="flex justify-between gap-3 pt-2">
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-lg border border-slate-300 text-slate-700 font-medium px-4 py-2.5 hover:bg-slate-50"
+          disabled={isSubmitting || enviando}
+          className="rounded-lg border border-slate-300 text-slate-700 font-medium px-4 py-2.5 hover:bg-slate-50 disabled:opacity-50"
         >
           ← Atrás
         </button>
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || enviando}
           className="rounded-lg bg-slate-900 text-white font-medium px-4 py-2.5 hover:bg-slate-800 disabled:opacity-50"
         >
-          Siguiente →
+          {enviando ? 'Guardando firma…' : 'Siguiente →'}
         </button>
       </div>
     </form>
@@ -617,259 +360,41 @@ export function Seccion3Salud({ expediente, onSave, onPrev, onNext }: Props) {
 // Helpers
 // ----------------------------------------------------------------------------
 
-function defaultsFromPrevio(
-  previo: Partial<Seccion3Values>,
-  expediente: Expediente
-): Seccion3Values {
-  // Prefill alergias.respuesta desde la columna `tiene_alergias` si existe
-  // y no hay valor en previo (consistencia con sección 1 / backoffice).
-  const alergiasRespuesta =
-    previo.alergias?.respuesta ??
-    (expediente.tiene_alergias === true
-      ? ('si' as const)
-      : expediente.tiene_alergias === false
-        ? ('no' as const)
-        : (undefined as unknown as 'no'))
-
-  return {
-    situacion_familiar: previo.situacion_familiar ?? emptyNoSi(),
-    antecedentes_medicos: previo.antecedentes_medicos ?? {
-      respuesta: undefined as unknown as 'no',
-      tipos: [],
-      otras: '',
-      comentarios: '',
-    },
-    alergias: {
-      respuesta: alergiasRespuesta,
-      que: previo.alergias?.que ?? expediente.detalle_alergias ?? '',
-      reaccion: previo.alergias?.reaccion ?? '',
-    },
-    mareos: previo.mareos ?? emptyNoSi(),
-    alimentacion: previo.alimentacion ?? {
-      come: undefined as unknown as 'normal',
-      dieta: emptyNoSi(),
-      peso_kg: '',
-    },
-    experiencia_colonias: previo.experiencia_colonias ?? {
-      veces: undefined as unknown as 'nunca',
-      comentarios: '',
-    },
-    patologias: previo.patologias ?? {
-      respuesta: undefined as unknown as 'no',
-      tipos: [],
-      otros: '',
-    },
-    covid: previo.covid ?? {
-      info: emptyNoSi(),
-      dosis: '',
-    },
-    discapacidad: previo.discapacidad ?? emptyNoSi(),
-    movilidad: previo.movilidad ?? emptyNoSi(),
-    motricidad: previo.motricidad ?? emptyNoSi(),
-    gafas_lentillas: previo.gafas_lentillas ?? emptyNoSi(),
-    aparatos_bucales: previo.aparatos_bucales ?? emptyNoSi(),
-    miedos: previo.miedos ?? emptyNoSi(),
-    caracter: previo.caracter ?? emptyNoSi(),
-    atencion_especial: previo.atencion_especial ?? emptyNoSi(),
-    vacunacion: previo.vacunacion ?? {
-      opcion: undefined as unknown as '1',
-      declaro_vacunas: false,
-      certificado_path: null,
-    },
-  }
+function formatearRangoCampus(ini: string, fin: string): string {
+  const di = new Date(ini)
+  const df = new Date(fin)
+  if (Number.isNaN(di.getTime()) || Number.isNaN(df.getTime())) return ''
+  const mes = di.toLocaleDateString('es-ES', { month: 'long' })
+  const ano = di.getFullYear()
+  return `${di.getDate()}–${df.getDate()} de ${mes} de ${ano}`
 }
 
-function emptyNoSi() {
-  return {
-    respuesta: undefined as unknown as 'no',
-    detalle: '',
-  }
-}
+// ----------------------------------------------------------------------------
+// Sub-componentes
+// ----------------------------------------------------------------------------
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900'
 
-function Bloque({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="space-y-3 border-t border-slate-200 pt-6 first:border-t-0 first:pt-0">
-      {children}
-    </div>
-  )
-}
-
-function Titulo({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-base font-semibold text-slate-900">{children}</h3>
-  )
-}
-
-function Pregunta({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-slate-700">{children}</p>
-}
-
 function Field({
   label,
   error,
+  requerido,
   children,
 }: {
   label: string
   error?: string
+  requerido?: boolean
   children: React.ReactNode
 }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">
         {label}
+        {requerido && <span className="text-red-600 ml-0.5">*</span>}
       </label>
       {children}
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
     </div>
-  )
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function RadioNoSi({ name, register }: { name: string; register: UseFormRegister<any> }) {
-  return (
-    <div className="flex gap-4">
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="radio" value="no" {...register(name)} />
-        <span>No</span>
-      </label>
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="radio" value="si" {...register(name)} />
-        <span>Sí</span>
-      </label>
-    </div>
-  )
-}
-
-function RadioInline({
-  name,
-  options,
-  register,
-}: {
-  name: string
-  options: ReadonlyArray<{ value: string; label: string }>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: UseFormRegister<any>
-}) {
-  return (
-    <div className="flex flex-wrap gap-x-4 gap-y-2">
-      {options.map((o) => (
-        <label key={o.value} className="flex items-center gap-2 cursor-pointer">
-          <input type="radio" value={o.value} {...register(name)} />
-          <span>{o.label}</span>
-        </label>
-      ))}
-    </div>
-  )
-}
-
-function CheckboxList({
-  name,
-  options,
-  register,
-}: {
-  name: string
-  options: readonly string[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: UseFormRegister<any>
-}) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {options.map((o) => (
-        <label key={o} className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" value={o} {...register(name)} />
-          <span className="text-sm">{o}</span>
-        </label>
-      ))}
-    </div>
-  )
-}
-
-function NoSiBloque({
-  name,
-  label,
-  question,
-  detailLabel = 'Especificar',
-  register,
-  watch,
-  error,
-}: {
-  name: string
-  label: string
-  question: string
-  detailLabel?: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: UseFormRegister<any>
-  watch: UseFormWatch<Seccion3Values>
-  error?: string
-}) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const respuesta = watch(`${name}.respuesta` as any)
-  return (
-    <Bloque>
-      <Titulo>{label}</Titulo>
-      <Pregunta>{question}</Pregunta>
-      <RadioNoSi name={`${name}.respuesta`} register={register} />
-      {respuesta === 'si' && (
-        <Field label={detailLabel} error={error}>
-          <textarea
-            rows={2}
-            className={inputCls}
-            {...register(`${name}.detalle`)}
-          />
-        </Field>
-      )}
-    </Bloque>
-  )
-}
-
-// Input que solo permite dígitos (y opcionalmente un punto/coma decimal).
-function InputNumerico({
-  name,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register,
-  permitirDecimal,
-  placeholder,
-}: {
-  name: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: any
-  permitirDecimal?: boolean
-  placeholder?: string
-}) {
-  const reg = register(name) as {
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-    onBlur: (e: React.FocusEvent<HTMLInputElement>) => void
-    ref: React.Ref<HTMLInputElement>
-    name: string
-  }
-  const cleanFn = permitirDecimal
-    ? (s: string) => {
-        // Solo dígitos + un único punto. La coma se convierte a punto.
-        const trans = s.replace(/,/g, '.').replace(/[^\d.]/g, '')
-        const partes = trans.split('.')
-        return partes.length > 2
-          ? partes[0] + '.' + partes.slice(1).join('')
-          : trans
-      }
-    : (s: string) => s.replace(/\D/g, '')
-  return (
-    <input
-      type="text"
-      inputMode={permitirDecimal ? 'decimal' : 'numeric'}
-      pattern={permitirDecimal ? '[0-9.]*' : '[0-9]*'}
-      placeholder={placeholder}
-      className={inputCls}
-      name={reg.name}
-      ref={reg.ref}
-      onBlur={reg.onBlur}
-      onChange={(e) => {
-        const limpio = cleanFn(e.target.value)
-        if (e.target.value !== limpio) e.target.value = limpio
-        reg.onChange(e)
-      }}
-    />
   )
 }

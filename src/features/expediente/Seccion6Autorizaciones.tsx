@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useForm, type UseFormRegister } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -12,9 +12,11 @@ import {
   FALTAS_GRAVES,
   FALTAS_MUY_GRAVES,
 } from './textosLegales'
+import { SignatureCanvas, type SignatureCanvasHandle } from './SignatureCanvas'
+import { subirYRegistrarFirma, textoAutorizacion } from './firmaService'
 
 // ----------------------------------------------------------------------------
-// Schema (lenient — todas las decisiones se enforcen en sección 7)
+// Schema
 // ----------------------------------------------------------------------------
 
 const noSi = z.union([z.literal('no'), z.literal('si')], {
@@ -36,56 +38,19 @@ const debeSerCierto = z
   .refine((v) => v === true, 'Debes marcar esta casilla para continuar')
 
 const schema = z.object({
-  comunicaciones: z.union(
-    [
-      z.literal('no'),
-      z.literal('email'),
-      z.literal('postal'),
-      z.literal('ambos'),
-    ],
-    { error: 'Selecciona una opción' }
-  ),
-
-  imagen: z.object({
-    decision: z.union(
-      [z.literal('autorizo'), z.literal('no_autorizo')],
-      { error: 'Selecciona una opción' }
-    ),
-  }),
-
-  observaciones_generales: noSiTexto,
-
-  agua: noSiTexto,
-
-  nivel_natacion: z
-    .object({
-      nivel: z.union(
-        [
-          z.literal('no_sabe'),
-          z.literal('basico'),
-          z.literal('medio'),
-          z.literal('avanzado'),
-          z.literal('otro'),
-        ],
-        { error: 'Selecciona una opción' }
-      ),
-      otro: z.string().optional(),
-    })
-    .refine(
-      (v) => v.nivel !== 'otro' || (v.otro?.trim().length ?? 0) > 0,
-      { path: ['otro'], message: 'Especifica' }
-    ),
-
-  llamada_familias: z.object({
-    fechas_seleccionadas: z.array(z.string()),
-    cualquiera: z.boolean(),
-    otra_preferencia: z.string().optional(),
-  }),
-
   decalogo_leido: debeSerCierto,
   reglamento_leido: debeSerCierto,
   reglamento_acepto_normas: debeSerCierto,
   reglamento_entiendo_consecuencias: debeSerCierto,
+
+  observaciones_generales: noSiTexto,
+
+  // El nombre del participante se escribe como acto de aceptación tras la
+  // firma del tutor. La firma manuscrita se gestiona vía canvas externo y
+  // se sube a Storage en `onValid`.
+  firma_nino_nombre: z
+    .string()
+    .min(1, 'El/la participante debe escribir su nombre'),
 })
 
 export type Seccion6Values = z.infer<typeof schema>
@@ -107,7 +72,6 @@ type Props = {
 
 export function Seccion6Autorizaciones({
   expediente,
-  edicion,
   onSave,
   onPrev,
   onNext,
@@ -120,27 +84,26 @@ export function Seccion6Autorizaciones({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     defaultValues: {
-      comunicaciones: previo.comunicaciones,
-      imagen: previo.imagen ?? { decision: undefined },
-      observaciones_generales:
-        previo.observaciones_generales ?? { respuesta: undefined, detalle: '' },
-      agua: previo.agua ?? { respuesta: undefined, detalle: '' },
-      nivel_natacion: previo.nivel_natacion ?? { nivel: undefined, otro: '' },
-      llamada_familias: previo.llamada_familias ?? {
-        fechas_seleccionadas: [],
-        cualquiera: false,
-        otra_preferencia: '',
-      },
       decalogo_leido: previo.decalogo_leido ?? false,
       reglamento_leido: previo.reglamento_leido ?? false,
       reglamento_acepto_normas: previo.reglamento_acepto_normas ?? false,
       reglamento_entiendo_consecuencias:
         previo.reglamento_entiendo_consecuencias ?? false,
+      observaciones_generales:
+        previo.observaciones_generales ?? { respuesta: undefined, detalle: '' },
+      firma_nino_nombre:
+        previo.firma_nino_nombre ??
+        `${expediente.alumno_nombre ?? ''} ${
+          expediente.alumno_apellidos ?? ''
+        }`.trim(),
     },
   })
 
   const { register, handleSubmit, watch, formState: { isSubmitting, errors } } = form
   const values = watch()
+
+  const firmaRef = useRef<SignatureCanvasHandle>(null)
+  const [enviandoFirma, setEnviandoFirma] = useState(false)
 
   const saveStatus = useAutosave({
     data: values,
@@ -150,11 +113,44 @@ export function Seccion6Autorizaciones({
     },
   })
 
-  const fechasLlamada = edicion?.fechas_llamada_familias ?? []
+  const alumnoNombre = `${expediente.alumno_nombre ?? ''} ${
+    expediente.alumno_apellidos ?? ''
+  }`.trim()
 
   const [submitError, setSubmitError] = useState<string | null>(null)
   const onValid = async () => {
     setSubmitError(null)
+    const ref = firmaRef.current
+    if (!ref || ref.isEmpty()) {
+      setSubmitError(
+        'Falta la firma del tutor/a conformidad con el decálogo y el reglamento.'
+      )
+      return
+    }
+    setEnviandoFirma(true)
+    try {
+      const blob = await ref.toBlob()
+      if (!blob) throw new Error('No se pudo generar la firma')
+      const ahora = new Date().toISOString()
+      const texto = textoAutorizacion('reglamento_tutor', {
+        alumnoNombre: alumnoNombre || '[participante]',
+        timestamp: ahora,
+      })
+      await subirYRegistrarFirma({
+        expedienteId: expediente.id,
+        tipo: 'reglamento_tutor',
+        blob,
+        firmadoPor: expediente.tutor_email ?? 'tutor/a firmante',
+        textoAutorizacion: texto,
+      })
+    } catch (e) {
+      setSubmitError(
+        e instanceof Error ? e.message : 'No se pudo guardar la firma'
+      )
+      setEnviandoFirma(false)
+      return
+    }
+    setEnviandoFirma(false)
     await onNext()
   }
   const onInvalid = () => setSubmitError(MSG_FALTAN_RESPUESTAS)
@@ -167,222 +163,15 @@ export function Seccion6Autorizaciones({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">
-            Autorizaciones y normas
+            Decálogo de convivencia
           </h2>
           <p className="text-slate-600 text-sm mt-1">
-            Las firmas se recogen en la última sección.
+            Lee con tu hijo/a el decálogo y el reglamento, marca las casillas y
+            firma al final.
           </p>
         </div>
         <IndicadorGuardado status={saveStatus} />
       </div>
-
-      {/* Comunicaciones */}
-      <Bloque>
-        <Titulo>Comunicaciones de la Fundación</Titulo>
-        <Pregunta>
-          ¿Desea recibir información de la Fundación Rafael del Pino sobre
-          futuras actividades?
-        </Pregunta>
-        <RadioVertical
-          name="comunicaciones"
-          register={register}
-          options={[
-            { value: 'no', label: 'No' },
-            { value: 'email', label: 'Sí, por correo electrónico' },
-            { value: 'postal', label: 'Sí, por correo postal' },
-            { value: 'ambos', label: 'Sí, por correo electrónico y postal' },
-          ]}
-        />
-        {errors.comunicaciones?.message && (
-          <p className="text-red-600 text-sm">{errors.comunicaciones.message as string}</p>
-        )}
-      </Bloque>
-
-      {/* Derechos de imagen */}
-      <Bloque>
-        <Titulo>Derechos de imagen</Titulo>
-        <Pregunta>
-          ¿Autorizáis el uso de imágenes del/de la participante en la web,
-          redes sociales o memoria de actividades del Campus FRP?
-        </Pregunta>
-
-        {/* Capa 1: información antes de elegir */}
-        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
-          <strong className="block mb-1">Importante a tener en cuenta</strong>
-          <p>
-            Toda la comunicación con las familias durante el Campus se hace
-            por la cuenta de <strong>Instagram</strong> del programa y la
-            <strong> web</strong>. Si vuestro hijo/a no sale en imágenes,
-            tampoco podréis seguir su día a día por estos canales.
-          </p>
-        </div>
-
-        <RadioVertical
-          name="imagen.decision"
-          register={register}
-          options={[
-            {
-              value: 'autorizo',
-              label: 'Sí, autorizamos el uso de imágenes',
-            },
-            {
-              value: 'no_autorizo',
-              label: 'No autorizamos el uso de imágenes',
-            },
-          ]}
-        />
-        {errors.imagen?.decision?.message && (
-          <p className="text-red-600 text-sm">{errors.imagen.decision.message as string}</p>
-        )}
-
-        {/* Capa 2: recordatorio suave si eligen "No" — una sola vez, sin presión */}
-        {watch('imagen.decision') === 'no_autorizo' && (
-          <div className="rounded-lg bg-amber-50 border border-amber-300 p-3 text-sm text-amber-900">
-            <p>
-              Recordamos que la comunicación del Campus se hace por
-              Instagram y la web. Si no autorizáis, vuestro hijo/a no
-              aparecerá en estas publicaciones, pero tampoco podréis ver
-              lo que va haciendo por esos canales.
-            </p>
-            <p className="mt-2">
-              Si cambiáis de opinión, podéis volver a la opción anterior.
-              Si estáis seguros, continuad con el formulario.
-            </p>
-          </div>
-        )}
-      </Bloque>
-
-      {/* Observaciones generales */}
-      <Bloque>
-        <Titulo>Observaciones generales para el equipo</Titulo>
-        <Pregunta>
-          ¿Hay algo importante sobre su hijo/a que considere necesario explicar
-          al equipo del Campus?
-        </Pregunta>
-        <RadioNoSi name="observaciones_generales.respuesta" register={register} />
-        {(errors.observaciones_generales as { respuesta?: { message?: string } })?.respuesta?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.observaciones_generales as { respuesta?: { message?: string } }).respuesta?.message}
-          </p>
-        )}
-        {watch('observaciones_generales.respuesta') === 'si' && (
-          <Field label="Especificar">
-            <textarea
-              rows={3}
-              className={inputCls}
-              {...register('observaciones_generales.detalle')}
-            />
-            {(errors.observaciones_generales as { detalle?: { message?: string } })?.detalle?.message && (
-              <p className="text-red-600 text-sm">
-                {(errors.observaciones_generales as { detalle?: { message?: string } }).detalle?.message}
-              </p>
-            )}
-          </Field>
-        )}
-      </Bloque>
-
-      {/* Natación y agua */}
-      <Bloque>
-        <Titulo>Actividades de agua y natación</Titulo>
-        <Pregunta>
-          ¿Hay alguna limitación o precaución que debamos tener en cuenta en
-          actividades de agua?
-        </Pregunta>
-        <RadioNoSi name="agua.respuesta" register={register} />
-        {(errors.agua as { respuesta?: { message?: string } })?.respuesta?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.agua as { respuesta?: { message?: string } }).respuesta?.message}
-          </p>
-        )}
-        {watch('agua.respuesta') === 'si' && (
-          <Field label="Especificar">
-            <textarea
-              rows={2}
-              className={inputCls}
-              {...register('agua.detalle')}
-            />
-            {(errors.agua as { detalle?: { message?: string } })?.detalle?.message && (
-              <p className="text-red-600 text-sm">
-                {(errors.agua as { detalle?: { message?: string } }).detalle?.message}
-              </p>
-            )}
-          </Field>
-        )}
-        <Pregunta>Nivel de natación del/de la participante:</Pregunta>
-        <RadioVertical
-          name="nivel_natacion.nivel"
-          register={register}
-          options={[
-            { value: 'no_sabe', label: 'No sabe nadar' },
-            { value: 'basico', label: 'Nivel básico' },
-            { value: 'medio', label: 'Nivel medio' },
-            { value: 'avanzado', label: 'Nivel avanzado' },
-            { value: 'otro', label: 'Otro / comentario' },
-          ]}
-        />
-        {(errors.nivel_natacion as { nivel?: { message?: string } })?.nivel?.message && (
-          <p className="text-red-600 text-sm">
-            {(errors.nivel_natacion as { nivel?: { message?: string } }).nivel?.message}
-          </p>
-        )}
-        {watch('nivel_natacion.nivel') === 'otro' && (
-          <Field label="Comentario">
-            <input
-              type="text"
-              className={inputCls}
-              {...register('nivel_natacion.otro')}
-            />
-            {(errors.nivel_natacion as { otro?: { message?: string } })?.otro?.message && (
-              <p className="text-red-600 text-sm">
-                {(errors.nivel_natacion as { otro?: { message?: string } }).otro?.message}
-              </p>
-            )}
-          </Field>
-        )}
-      </Bloque>
-
-      {/* Llamada con familias */}
-      <Bloque>
-        <Titulo>Llamada con familias</Titulo>
-        <Pregunta>
-          Indica los días que te van bien para una llamada con el equipo del
-          Campus (puedes marcar varios):
-        </Pregunta>
-        <div className="space-y-2">
-          {fechasLlamada.length === 0 && (
-            <p className="text-sm text-slate-500">
-              Aún no hay fechas configuradas para esta edición.
-            </p>
-          )}
-          {fechasLlamada.map((fecha) => (
-            <label
-              key={fecha}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                value={fecha}
-                {...register('llamada_familias.fechas_seleccionadas')}
-              />
-              <span>{formatearFecha(fecha)}</span>
-            </label>
-          ))}
-          <label className="flex items-center gap-2 cursor-pointer mt-2 border-t border-slate-200 pt-2">
-            <input
-              type="checkbox"
-              {...register('llamada_familias.cualquiera')}
-            />
-            <span>Nos va bien cualquier día</span>
-          </label>
-        </div>
-        <Field label="Otra preferencia (opcional)">
-          <input
-            type="text"
-            className={inputCls}
-            {...register('llamada_familias.otra_preferencia')}
-          />
-        </Field>
-      </Bloque>
 
       {/* Decálogo */}
       <Bloque>
@@ -481,22 +270,106 @@ export function Seccion6Autorizaciones({
         </div>
       </Bloque>
 
+      {/* Firmas: tutor + nombre del participante */}
+      <Bloque>
+        <Titulo>Firmas</Titulo>
+        <p className="text-sm text-slate-600">
+          Firma de conformidad con el decálogo y el reglamento interno del
+          Campus FRP, y firma escrita del/de la participante.
+        </p>
+
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="text-sm font-semibold text-slate-900">
+            Firma del padre/madre/tutor/a
+          </div>
+          <div className="text-xs text-slate-600 whitespace-pre-line bg-slate-50 rounded-lg p-3">
+            {textoAutorizacion('reglamento_tutor', {
+              alumnoNombre: alumnoNombre || '[participante]',
+              timestamp: new Date().toISOString(),
+            })}
+          </div>
+          <SignatureCanvas
+            ref={firmaRef}
+            ariaLabel="Firma conformidad con decálogo y reglamento"
+          />
+          <button
+            type="button"
+            onClick={() => firmaRef.current?.clear()}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Limpiar firma
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+          <div className="text-sm font-semibold text-slate-900">
+            Nombre del/de la participante
+          </div>
+          <p className="text-xs text-slate-600">
+            Verifica con tu hijo/a que el nombre es correcto. Su presencia aquí
+            confirma que ha leído o se le ha explicado el decálogo y el
+            reglamento. Puedes corregirlo si hay alguna errata.
+          </p>
+          <input
+            type="text"
+            className={inputCls}
+            placeholder="Nombre y apellidos"
+            {...register('firma_nino_nombre')}
+          />
+          {errors.firma_nino_nombre?.message && (
+            <p className="text-red-600 text-sm">
+              {errors.firma_nino_nombre.message as string}
+            </p>
+          )}
+        </div>
+      </Bloque>
+
+      {/* Observaciones generales — al final, después de las firmas */}
+      <Bloque>
+        <Titulo>Observaciones generales para el equipo</Titulo>
+        <Pregunta>
+          ¿Hay algo importante sobre su hijo/a que considere necesario explicar
+          al equipo del Campus?
+        </Pregunta>
+        <RadioNoSi name="observaciones_generales.respuesta" register={register} />
+        {(errors.observaciones_generales as { respuesta?: { message?: string } })?.respuesta?.message && (
+          <p className="text-red-600 text-sm">
+            {(errors.observaciones_generales as { respuesta?: { message?: string } }).respuesta?.message}
+          </p>
+        )}
+        {watch('observaciones_generales.respuesta') === 'si' && (
+          <Field label="Especificar">
+            <textarea
+              rows={3}
+              className={inputCls}
+              {...register('observaciones_generales.detalle')}
+            />
+            {(errors.observaciones_generales as { detalle?: { message?: string } })?.detalle?.message && (
+              <p className="text-red-600 text-sm">
+                {(errors.observaciones_generales as { detalle?: { message?: string } }).detalle?.message}
+              </p>
+            )}
+          </Field>
+        )}
+      </Bloque>
+
       {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
 
       <div className="flex justify-between gap-3 pt-2 border-t border-slate-200">
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-lg border border-slate-300 text-slate-700 font-medium px-4 py-2.5 hover:bg-slate-50"
+          disabled={enviandoFirma}
+          className="rounded-lg border border-slate-300 text-slate-700 font-medium px-4 py-2.5 hover:bg-slate-50 disabled:opacity-50"
         >
           ← Atrás
         </button>
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || enviandoFirma}
           className="rounded-lg bg-slate-900 text-white font-medium px-4 py-2.5 hover:bg-slate-800 disabled:opacity-50"
         >
-          Siguiente →
+          {enviandoFirma ? 'Guardando firma…' : 'Siguiente →'}
         </button>
       </div>
     </form>
@@ -504,18 +377,8 @@ export function Seccion6Autorizaciones({
 }
 
 // ----------------------------------------------------------------------------
-// Helpers
+// Estilos / sub-componentes
 // ----------------------------------------------------------------------------
-
-function formatearFecha(iso: string): string {
-  const d = new Date(iso)
-  const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
-  const meses = [
-    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-  ]
-  return `${dias[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]}`
-}
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900'
@@ -549,28 +412,6 @@ function Field({
         {label}
       </label>
       {children}
-    </div>
-  )
-}
-
-function RadioVertical({
-  name,
-  options,
-  register,
-}: {
-  name: string
-  options: ReadonlyArray<{ value: string; label: string }>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: UseFormRegister<any>
-}) {
-  return (
-    <div className="space-y-2">
-      {options.map((o) => (
-        <label key={o.value} className="flex items-start gap-2 cursor-pointer">
-          <input type="radio" value={o.value} className="mt-1" {...register(name)} />
-          <span className="text-sm">{o.label}</span>
-        </label>
-      ))}
     </div>
   )
 }
