@@ -2,6 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import './index.css'
+// Configura los mensajes de error de Zod en español. Debe importarse antes
+// de cualquier schema que se evalúe.
+import './lib/zodConfig'
 import { Landing } from './routes/public/Landing'
 import { MensajeEnviado } from './routes/public/MensajeEnviado'
 import { Callback } from './routes/public/Callback'

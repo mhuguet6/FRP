@@ -533,7 +533,8 @@ FRP/
     │   ├── useSession.ts            Hook de sesión
     │   ├── useStaffStatus.ts        ¿Soy staff/admin?
     │   ├── useClientaStatus.ts      ¿Soy clienta?
-    │   └── useAutosave.ts           Debounced save + flush on unmount
+    │   ├── useAutosave.ts           Debounced save + flush on unmount
+    │   └── zodConfig.ts             Mapa global de errores Zod en español
     │
     ├── components/
     │   ├── RequireAuth.tsx
@@ -947,6 +948,7 @@ La firma de vacunación se eliminó (ahora es una declaración por radio en S3).
 - Cada sección bloquea el botón "Siguiente" si faltan obligatorios.
 - Como consecuencia, **S7 ya no muestra la lista de "faltantes"** ni gating de "Completa los datos pendientes": por diseño, llegar a S7 implica que todo lo anterior está completo. S7 solo valida sus propios campos (nombre tutor, firma) inline al pulsar "Enviar".
 - **Coherencia cruzada S2↔S3**: si la familia listó medicación en S2 pero marca "No toma" en S3 (o autoriza pero no listó nada en S2), aparece un aviso inline justo bajo la pregunta de S3.
+- **Mensajes de error globales en español** (`src/lib/zodConfig.ts`): mapa global de Zod 4 que sustituye los códigos crípticos por defecto (tipo *"error.expectedvalueNO"*) por mensajes amigables como *"Por favor, rellena este campo para continuar"*. Los schemas que tienen mensaje custom siguen mostrando el suyo; este config solo cubre los casos sin mensaje.
 
 ### Patrón de preguntas Sí/No en S2
 
